@@ -13,35 +13,118 @@ import json
 
 import pytest
 
-from go8agent.agent import (
-    SYSTEM_PROMPT,
-    TOOLS,
+from go8agent.agent import SYSTEM_PROMPT
+from go8agent.tools import (
+    IMPLEMENTATIONS,
+    TOOL_SCHEMAS,
     check_program_eligibility,
+    dispatch,
     get_program_details,
     search_programs,
+    to_anthropic_tools,
+    to_openai_tools,
 )
 
 
 class TestToolSchemas:
-    """schema 由函数签名和 docstring 自动生成，模型只能看到这些。"""
+    """schema 是手写的，模型只能看到这些字符串。"""
 
     def test_all_tools_have_descriptions(self):
-        for tool in TOOLS:
-            assert tool.description, f"{tool.name} 没有描述，模型将不知道它是干什么的"
+        for schema in TOOL_SCHEMAS:
+            assert schema["description"], f"{schema['name']} 没有描述"
 
     def test_every_parameter_is_documented(self):
         """漏写一个参数的说明，模型就会瞎猜该传什么。"""
-        for tool in TOOLS:
-            for name, spec in tool.input_schema["properties"].items():
-                assert spec.get("description"), f"{tool.name} 的参数 {name} 缺少说明"
+        for schema in TOOL_SCHEMAS:
+            for name, spec in schema["parameters"]["properties"].items():
+                assert spec.get("description"), f"{schema['name']} 的参数 {name} 缺少说明"
+
+    def test_schema_matches_function_signature(self):
+        """手写 schema 的风险是和函数签名走偏，这里逐个比对。"""
+        import inspect
+
+        for schema in TOOL_SCHEMAS:
+            func = IMPLEMENTATIONS[schema["name"]]
+            sig_params = set(inspect.signature(func).parameters)
+            schema_params = set(schema["parameters"]["properties"])
+            assert schema_params == sig_params, (
+                f"{schema['name']} 的 schema 与函数签名不一致："
+                f"schema 多出 {schema_params - sig_params}，缺少 {sig_params - schema_params}"
+            )
 
     def test_program_key_is_required_where_it_matters(self):
-        assert get_program_details.input_schema["required"] == ["program_key"]
-        assert "program_key" in check_program_eligibility.input_schema["required"]
+        by_name = {s["name"]: s for s in TOOL_SCHEMAS}
+        assert by_name["get_program_details"]["parameters"]["required"] == ["program_key"]
+        assert "program_key" in by_name["check_program_eligibility"]["parameters"]["required"]
 
     def test_search_has_no_required_params(self):
         """检索应当允许只给一个关键词就用，不该逼模型凑齐参数。"""
-        assert not search_programs.input_schema.get("required")
+        by_name = {s["name"]: s for s in TOOL_SCHEMAS}
+        assert by_name["search_programs"]["parameters"]["required"] == []
+
+
+class TestProviderFormats:
+    """同一套工具要能同时喂给两个供应商。"""
+
+    def test_openai_format_nests_function(self):
+        tools = to_openai_tools()
+        assert all(t["type"] == "function" for t in tools)
+        assert {t["function"]["name"] for t in tools} == set(IMPLEMENTATIONS)
+        assert "parameters" in tools[0]["function"]
+
+    def test_anthropic_format_uses_input_schema(self):
+        tools = to_anthropic_tools()
+        assert {t["name"] for t in tools} == set(IMPLEMENTATIONS)
+        assert "input_schema" in tools[0]
+
+    def test_both_formats_carry_the_same_schemas(self):
+        """两边必须是同一份 schema，否则模型对比评估就没意义了。"""
+        openai_schemas = {t["function"]["name"]: t["function"]["parameters"]
+                          for t in to_openai_tools()}
+        anthropic_schemas = {t["name"]: t["input_schema"] for t in to_anthropic_tools()}
+        assert openai_schemas == anthropic_schemas
+
+
+class TestArgumentValidation:
+    """DeepSeek 官方文档写明：模型可能编造 schema 里没有的参数，需自行校验。
+
+    没有这一层，一个编出来的参数会直接变成 TypeError 打断整个 loop。
+    """
+
+    def test_hallucinated_parameter_is_rejected_with_allowed_list(self):
+        payload = json.loads(dispatch("search_programs",
+                                      {"keyword": "IT", "sort_by": "ranking"}))
+        assert "sort_by" in payload["error"]
+        assert "keyword" in payload["allowed"]  # 告诉模型有哪些合法参数
+
+    def test_unknown_tool_name_lists_available_tools(self):
+        payload = json.loads(dispatch("book_flight", {}))
+        assert "available" in payload
+
+    def test_missing_required_parameter_is_reported(self):
+        payload = json.loads(dispatch("get_program_details", {}))
+        assert "program_key" in payload["error"]
+
+    def test_invalid_enum_value_is_rejected(self):
+        payload = json.loads(dispatch("search_programs", {"level": "phd"}))
+        assert payload["allowed"] == ["bachelor", "master", "graduate_diploma",
+                                      "graduate_certificate", "research", "other"]
+
+    def test_numeric_string_is_coerced_not_rejected(self):
+        """模型常把数字写成字符串，这种能救就救，不必浪费一轮。"""
+        payload = json.loads(dispatch("search_programs",
+                                      {"keyword": "data science", "max_wam": "70"}))
+        assert payload["count"] > 0
+
+    def test_boolean_is_not_accepted_as_number(self):
+        """bool 是 int 的子类，不特判就会让 True 混过 number 检查。"""
+        payload = json.loads(dispatch("search_programs", {"max_wam": True}))
+        assert "布尔值" in payload["error"]
+
+    def test_explicit_null_is_treated_as_omitted(self):
+        payload = json.loads(dispatch("search_programs",
+                                      {"keyword": "data science", "level": None}))
+        assert payload["count"] > 0
 
 
 class TestErrorsAreDataNotExceptions:

@@ -329,8 +329,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
     from .agent import ask
 
     try:
-        answer = ask(args.question, verbose=not args.quiet)
-    except RuntimeError as exc:
+        answer = ask(args.question, provider=args.provider, verbose=not args.quiet)
+    except (RuntimeError, ValueError) as exc:
         print(exc, file=sys.stderr)
         return 2
     print()
@@ -398,8 +398,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_changes)
 
-    p = sub.add_parser("ask", help="用自然语言提问（需要 ANTHROPIC_API_KEY）")
+    p = sub.add_parser("ask", help="用自然语言提问（需要 DEEPSEEK_API_KEY 或 ANTHROPIC_API_KEY）")
     p.add_argument("question", help="问题，如「双非 78 分能申 Monash 的 IT 硕士吗」")
+    p.add_argument("--provider", choices=["deepseek", "anthropic"], default=None,
+                   help="模型供应商，默认读环境变量 GO8_PROVIDER，再默认 deepseek")
+    p.add_argument("--model", default=None, help="覆盖默认模型名")
     p.add_argument("--quiet", action="store_true", help="不打印工具调用过程")
     p.set_defaults(func=cmd_ask)
 

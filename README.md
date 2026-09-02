@@ -82,9 +82,12 @@ python -m go8agent export
 # 6. 资格判断（纯本地计算，不调模型）
 python -m go8agent check monash:C6001 --wam 78 --ielts 6.5 --ielts-min 6.0 --no-cognate
 
-# 7. 自然语言提问（需要 ANTHROPIC_API_KEY）
-export ANTHROPIC_API_KEY=...
+# 7. 自然语言提问
+export DEEPSEEK_API_KEY=...          # 默认供应商
 python -m go8agent ask "双非 78 分、雅思 6.5，跨专业能申哪些 IT 硕士"
+
+# 换供应商做对比（需要对应的 key）
+python -m go8agent ask "..." --provider anthropic
 
 # 8. 重抓之后看有什么变了
 python -m go8agent changes
@@ -92,6 +95,26 @@ python -m go8agent stats
 ```
 
 ---
+
+## 模型供应商
+
+默认 **DeepSeek**（`deepseek-v4-flash`，OpenAI 兼容接口），也支持 Anthropic。
+两边共用 `tools.py` 里的同一套工具和 schema，只在消息格式上各写一个薄适配器。
+
+这样设计不只是为了省钱：做评估时可以拿同一套工具去比不同模型，
+这是判断「该用哪个模型」的唯一靠谱方式。
+
+| 供应商 | 环境变量 | 默认模型 |
+|---|---|---|
+| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-5` |
+
+用 `GO8_PROVIDER` 或 `--provider` 切换。
+
+**参数校验不是可选项。** DeepSeek 官方文档明确写着模型「不一定生成合法 JSON，
+也可能编造出 schema 里没有定义的参数」。`tools.dispatch()` 会在调用前校验
+参数名、类型和枚举值，失败时返回错误说明而不是抛异常——模型读到之后
+通常能自己改正重试。
 
 ## 分支约定
 
@@ -127,7 +150,8 @@ src/go8agent/
 ├── fetch.py               限速抓取、sitemap 发现、快照存取
 ├── db.py                  SQLite、字段级变更历史、查询
 ├── eligibility.py         资格判断（纯 Python，不调模型）
-├── agent.py               Claude 工具封装与 agent loop
+├── tools.py               工具实现、schema 与参数校验（与供应商无关）
+├── agent.py               agent loop（DeepSeek / Anthropic 两套）
 ├── cli.py                 命令行
 └── sources/courseloop.py  Monash + UNSW 解析器
 tests/
