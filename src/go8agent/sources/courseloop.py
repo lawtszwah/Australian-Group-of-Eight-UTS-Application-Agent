@@ -105,6 +105,22 @@ def to_labels(value: Any) -> list[str]:
     return result
 
 
+# UNSW 的 entry_requirements_v2 是分域列表，只有这一域是真正的入学要求。
+# 其余域（如 Limitations on Recognition of Prior Learning）讲的是学分减免，
+# 里面的 "50% of the specialisation"、"12 UOC" 之类混进来会污染分数解析。
+ENTRY_DOMAIN = re.compile(r"minimum entry requirement|entry requirement", re.I)
+
+
+def extract_entry_text(value: Any) -> str:
+    """从入学要求字段里取正文，分域结构只保留入学要求那一域。"""
+    if isinstance(value, list) and value and isinstance(value[0], dict) and "domain" in value[0]:
+        kept = [g for g in value if ENTRY_DOMAIN.search(str(g.get("domain", "")))]
+        if not kept:
+            return ""  # 没有入学要求域就是没有，不能拿别的域顶替
+        return " ".join(to_text(g.get("requirements", g)) for g in kept).strip()
+    return to_text(value)
+
+
 def pick(content: dict, names: list[str]) -> Any:
     """按优先级取第一个"压成文本后非空"的字段。
 
@@ -184,7 +200,7 @@ def parse_entry(text: str) -> EntryRequirement:
     # 注意 "WAM of 60" 是不带百分号的，只能靠 "WAM ... of" 这个上下文限定，
     # 否则会把学分数、时长之类的数字也抓进来。
     patterns = [
-        r"(?:weighted average mark|WAM|average mark|GPA equivalent)\D{0,30}?(\d{2,3}(?:\.\d)?)\s*%",
+        r"(?:weighted average mark|WAM|average mark|credit average|GPA equivalent)\D{0,30}?(\d{2,3}(?:\.\d)?)\s*%",
         r"(?:weighted average mark|WAM)[^.]{0,25}?\bof\b\s*(\d{2,3}(?:\.\d)?)\s*%?",
         r"(?:high distinction|distinction|credit|pass)\s*(?:grade\s*)?\(\s*(\d{2,3})\s*%\s*\)",
         r"(\d{2,3}(?:\.\d)?)\s*%\s*(?:weighted\s+)?average",
@@ -193,6 +209,15 @@ def parse_entry(text: str) -> EntryRequirement:
     marks = [float(m.group(1)) for p in patterns if (m := re.search(p, text, re.I))]
     if marks:
         req.min_wam_percent = min(marks)  # 多个档位时取最低门槛
+
+    # 等级说法（无数字）。只记录事实，不换算成百分数。
+    band = re.search(
+        r"\b(high distinction|distinction|credit|pass)\s+average\b|"
+        r"\baverage\s+of\s+(high distinction|distinction|credit|pass)\b",
+        text, re.I,
+    )
+    if band:
+        req.min_grade_band = (band.group(1) or band.group(2)).lower().replace(" ", "_")
 
     if re.search(r"not necessarily in|any discipline|regardless of discipline", text, re.I):
         req.requires_cognate_degree = False
@@ -207,6 +232,11 @@ def parse_entry(text: str) -> EntryRequirement:
 def guess_level(title: str, content: dict, hint_fields: list[str]) -> Level:
     hint = " ".join(to_text(content.get(f)) for f in hint_fields)
     haystack = f"{title} {hint}".lower()
+    # 顺序要紧：graduate certificate/diploma 里也含 "graduate"，必须先判
+    if "graduate certificate" in haystack or "aqf 8 (certificate)" in haystack:
+        return "graduate_certificate"
+    if "graduate diploma" in haystack or "level 8 - graduate diploma" in haystack:
+        return "graduate_diploma"
     if "bachelor" in haystack or "aqf 7" in haystack:
         return "bachelor"
     if "doctor" in haystack or "philosophy" in haystack or "research" in haystack:
@@ -262,7 +292,7 @@ def parse(html: str, university: str, source_url: str, fetched_at: datetime | No
         campus=to_labels(pick(content, fields["campus"])),
         intakes=to_labels(pick(content, fields["intakes"])),
         english=parse_english(to_text(pick(content, fields["english"]))),
-        entry=parse_entry(to_text(pick(content, fields["entry"]))),
+        entry=parse_entry(extract_entry_text(pick(content, fields["entry"]))),
         source_url=source_url,
         source_updated_at=to_text(pick(content, fields["updated"])) or None,
         fetched_at=fetched_at or datetime.now(timezone.utc),

@@ -12,7 +12,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-Level = Literal["bachelor", "master", "research", "other"]
+# Graduate Diploma / Certificate 是 AQF 8，和硕士（AQF 9）不是一回事，
+# 对申请人来说是完全不同的产品，必须分开
+Level = Literal[
+    "bachelor", "graduate_certificate", "graduate_diploma",
+    "master", "research", "other",
+]
 
 
 class EnglishRequirement(BaseModel):
@@ -43,6 +48,9 @@ class EntryRequirement(BaseModel):
 
     raw: str | None = None
     min_wam_percent: float | None = None
+    # UNSW 等学校常写 "with a credit average"——页面上没有数字，只有等级。
+    # 换算成 65% 是推断而非事实，所以只记录等级本身，换算留给下游显式进行。
+    min_grade_band: str | None = None
     requires_cognate_degree: bool | None = None
     entry_levels: list[str] = Field(default_factory=list)
 
@@ -55,7 +63,7 @@ class EntryRequirement(BaseModel):
 
     @property
     def is_parsed(self) -> bool:
-        return self.min_wam_percent is not None
+        return self.min_wam_percent is not None or self.min_grade_band is not None
 
 
 class Program(BaseModel):

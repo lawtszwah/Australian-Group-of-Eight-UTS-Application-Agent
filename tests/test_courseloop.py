@@ -121,6 +121,7 @@ class TestParsers:
             # 澳洲成绩等级写法：pass/credit/distinction 后面括号里才是分数
             ("with a distinction grade (70%) average or above", 70.0),
             ("a recognised bachelor's degree with a pass (50%) average", 50.0),
+            ("equivalent to a UNSW credit average of 65%", 65.0),
             ("no numbers here at all", None),
             # Graduate Certificate 常常真的没有分数要求，不能瞎凑一个
             ("An Australian bachelor degree or equivalent qualification.", None),
@@ -134,6 +135,46 @@ class TestParsers:
         assert EnglishRequirement(ielts_overall=65.0).ielts_overall is None
         assert EnglishRequirement(ielts_overall=6.3).ielts_overall is None  # 雅思没有 .3
         assert EntryRequirement(min_wam_percent=650.0).min_wam_percent is None
+
+    @pytest.mark.parametrize("title,expected", [
+        ("Master of Information Technology", "master"),
+        ("Graduate Diploma in Mine Ventilation", "graduate_diploma"),
+        ("Graduate Certificate of Business", "graduate_certificate"),
+        ("Bachelor of Science", "bachelor"),
+    ])
+    def test_level_separates_aqf8_from_masters(self, title, expected):
+        """研究生文凭/证书是 AQF 8，不能和硕士混为一谈。"""
+        assert courseloop.guess_level(title, {}, []) == expected
+
+    @pytest.mark.parametrize("text,band,wam", [
+        ("a bachelor degree with a credit average", "credit", None),
+        ("Bachelor degree with a distinction average", "distinction", None),
+        # 同时给了等级和数字时，两者都要留下
+        ("equivalent to a UNSW credit average of 65%", "credit", 65.0),
+    ])
+    def test_grade_band_recorded_not_converted(self, text, band, wam):
+        """"credit average" 是等级不是分数。换算成 65% 属于推断，不能在解析层做。"""
+        req = courseloop.parse_entry(text)
+        assert req.min_grade_band == band
+        assert req.min_wam_percent == wam
+
+    def test_entry_domain_filter_excludes_rpl(self):
+        """UNSW 的学分减免条款不能混进入学要求——里面的百分数会被误读成分数线。"""
+        payload = [
+            {"domain": "Limitations on Recognition of Prior Learning",
+             "requirements": [{"description": "The maximum credit transfer is 50% of the specialisation."}]},
+            {"domain": "Minimum Entry Requirements",
+             "requirements": [{"description": "Bachelor Degree with a weighted average mark of 65%."}]},
+        ]
+        text = courseloop.extract_entry_text(payload)
+        assert "credit transfer" not in text
+        assert courseloop.parse_entry(text).min_wam_percent == 65.0
+
+    def test_entry_domain_missing_returns_empty(self):
+        """没有入学要求域时必须返回空，不能拿别的域顶替。"""
+        payload = [{"domain": "Limitations on Recognition of Prior Learning",
+                    "requirements": [{"description": "A maximum of 12 UOC of RPL."}]}]
+        assert courseloop.extract_entry_text(payload) == ""
 
     def test_bad_html_raises(self):
         with pytest.raises(ValueError, match="__NEXT_DATA__"):

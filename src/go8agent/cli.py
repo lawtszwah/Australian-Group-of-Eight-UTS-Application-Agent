@@ -193,7 +193,7 @@ EXPORT_COLUMNS = [
     "program_key", "university", "code", "title", "level", "faculty",
     "cricos_code", "credit_points", "duration_full_time", "campus", "intakes",
     "ielts_overall", "ielts_min_band", "toefl_ibt", "pte_overall",
-    "min_wam_percent", "requires_cognate_degree",
+    "min_wam_percent", "min_grade_band", "requires_cognate_degree",
     "source_url", "source_updated_at", "fetched_at",
 ]
 
@@ -210,6 +210,7 @@ def _flatten(program: Program) -> dict[str, object]:
         "toefl_ibt": program.english.toefl_ibt,
         "pte_overall": program.english.pte_overall,
         "min_wam_percent": program.entry.min_wam_percent,
+        "min_grade_band": program.entry.min_grade_band,
         "requires_cognate_degree": program.entry.requires_cognate_degree,
     })
     return {k: flat.get(k) for k in EXPORT_COLUMNS}
