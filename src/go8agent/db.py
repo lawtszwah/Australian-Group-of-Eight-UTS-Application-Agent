@@ -198,6 +198,12 @@ class Database:
             "SELECT * FROM changes ORDER BY changed_at DESC, id DESC LIMIT ?", (limit,)
         ).fetchall()
 
+    def all_programs(self) -> list[Program]:
+        rows = self.conn.execute(
+            "SELECT payload FROM programs ORDER BY university, code"
+        ).fetchall()
+        return [Program.model_validate_json(r["payload"]) for r in rows]
+
     def stats(self) -> dict[str, Any]:
         cur = self.conn.execute(
             "SELECT university, level, COUNT(*) n,"

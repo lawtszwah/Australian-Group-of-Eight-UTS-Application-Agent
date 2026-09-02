@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
 import sys
 from pathlib import Path
 
@@ -187,6 +189,87 @@ def cmd_changes(args: argparse.Namespace) -> int:
     return 0
 
 
+EXPORT_COLUMNS = [
+    "program_key", "university", "code", "title", "level", "faculty",
+    "cricos_code", "credit_points", "duration_full_time", "campus", "intakes",
+    "ielts_overall", "ielts_min_band", "toefl_ibt", "pte_overall",
+    "min_wam_percent", "requires_cognate_degree",
+    "source_url", "source_updated_at", "fetched_at",
+]
+
+
+def _flatten(program: Program) -> dict[str, object]:
+    """摊平成一行，给 CSV 和 JSON 共用。"""
+    data = program.model_dump(mode="json")
+    flat = {k: data.get(k) for k in EXPORT_COLUMNS if k in data}
+    flat.update({
+        "campus": "; ".join(program.campus),
+        "intakes": "; ".join(program.intakes),
+        "ielts_overall": program.english.ielts_overall,
+        "ielts_min_band": program.english.ielts_min_band,
+        "toefl_ibt": program.english.toefl_ibt,
+        "pte_overall": program.english.pte_overall,
+        "min_wam_percent": program.entry.min_wam_percent,
+        "requires_cognate_degree": program.entry.requires_cognate_degree,
+    })
+    return {k: flat.get(k) for k in EXPORT_COLUMNS}
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    """导出结构化数据集。
+
+    输出按 program_key 排序、JSON 缩进固定——这样 git diff 才是逐字段可读的，
+    下次重抓能直接看出"哪个项目的哪个要求变了"。
+    """
+    db = Database(DB_PATH)
+    programs = db.all_programs()
+    if not programs:
+        print("库里没有数据，先跑 crawl", file=sys.stderr)
+        return 1
+
+    out_dir = Path(args.out).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 完整版：保留 raw 原文，供人工核对和以后重新解析
+    full = [p.model_dump(mode="json") for p in programs]
+    (out_dir / "programs.json").write_text(
+        json.dumps(full, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    # 表格版：一行一个项目，方便直接在 GitHub 上看
+    rows = [_flatten(p) for p in programs]
+    with (out_dir / "programs.csv").open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=EXPORT_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    gaps: dict[str, int] = {}
+    for program in programs:
+        for gap in program.gaps():
+            gaps[gap] = gaps.get(gap, 0) + 1
+    (out_dir / "coverage.json").write_text(
+        json.dumps({
+            "total": len(programs),
+            "by_university": {
+                u: sum(1 for p in programs if p.university == u)
+                for u in sorted({p.university for p in programs})
+            },
+            "by_level": {
+                lv: sum(1 for p in programs if p.level == lv)
+                for lv in sorted({p.level for p in programs})
+            },
+            "missing_fields": dict(sorted(gaps.items())),
+        }, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    print(f"导出 {len(programs)} 个项目 -> {out_dir}")
+    for name in ("programs.json", "programs.csv", "coverage.json"):
+        print(f"  {name}  {(out_dir / name).stat().st_size / 1024:.0f} KB")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     db = Database(DB_PATH)
     stats = db.stats()
@@ -243,6 +326,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("changes", help="查看字段变更历史")
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_changes)
+
+    p = sub.add_parser("export", help="导出结构化数据集（给 data 分支用）")
+    p.add_argument("--out", default="export", help="输出目录，默认 ./export")
+    p.set_defaults(func=cmd_export)
 
     p = sub.add_parser("stats", help="数据覆盖情况")
     p.set_defaults(func=cmd_stats)

@@ -114,7 +114,16 @@ class TestParsers:
             ("with a weighted average mark of 65%", 65.0),
             ("at least a credit (60%) average", 60.0),
             ("a WAM of at least 75%", 75.0),
+            # Monash 商学院大量项目这样写，没有百分号
+            ("in a relevant discipline, with a Weighted Average Mark (WAM) of 60.", 60.0),
+            # 数字在 average 之前，且前面没有 minimum/at least
+            ("An Australian bachelor degree, in a cognate discipline with a 60% average.", 60.0),
+            # 澳洲成绩等级写法：pass/credit/distinction 后面括号里才是分数
+            ("with a distinction grade (70%) average or above", 70.0),
+            ("a recognised bachelor's degree with a pass (50%) average", 50.0),
             ("no numbers here at all", None),
+            # Graduate Certificate 常常真的没有分数要求，不能瞎凑一个
+            ("An Australian bachelor degree or equivalent qualification.", None),
         ],
     )
     def test_wam(self, text, expected):

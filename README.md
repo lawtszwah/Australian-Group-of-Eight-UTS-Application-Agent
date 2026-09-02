@@ -76,12 +76,29 @@ python -m go8agent show monash:C6001
 # 4. 改完解析逻辑后，用本地快照重跑，不碰学校服务器
 python -m go8agent reparse monash
 
-# 5. 重抓之后看有什么变了
+# 5. 导出结构化数据集（提交到 data 分支）
+python -m go8agent export
+
+# 6. 重抓之后看有什么变了
 python -m go8agent changes
 python -m go8agent stats
 ```
 
 ---
+
+## 分支约定
+
+| 分支 | 内容 |
+|---|---|
+| `main` | 只放代码。`seeds/`、`data/`、`export/` 都被 gitignore |
+| `data` | 抓取产出的数据集：`programs.json`、`programs.csv`、`coverage.json`、`seeds/` |
+
+`data` 是一条 orphan 分支（独立历史，不含代码），这样数据的提交记录不会和代码
+的提交记录搅在一起。原始 HTML 快照**不入库**——可随时重抓，且每次抓取都会新增
+一批带时间戳的文件，提交进去会让仓库无限膨胀。
+
+导出的 JSON 按 key 排序、缩进固定，所以 `git diff` 是逐字段可读的：
+下次重抓能直接看出「哪个项目的哪条要求变了」。
 
 ## 架构
 

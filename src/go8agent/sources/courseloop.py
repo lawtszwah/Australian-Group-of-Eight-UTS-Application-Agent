@@ -180,9 +180,14 @@ def parse_entry(text: str) -> EntryRequirement:
         return req
 
     # "weighted average mark of 65%" / "WAM of at least 65%" / "credit (60%) average"
+    # 各校（甚至同校不同院系）的写法差别很大，逐个句式试。
+    # 注意 "WAM of 60" 是不带百分号的，只能靠 "WAM ... of" 这个上下文限定，
+    # 否则会把学分数、时长之类的数字也抓进来。
     patterns = [
         r"(?:weighted average mark|WAM|average mark|GPA equivalent)\D{0,30}?(\d{2,3}(?:\.\d)?)\s*%",
-        r"credit\s*\(\s*(\d{2,3})\s*%\s*\)",
+        r"(?:weighted average mark|WAM)[^.]{0,25}?\bof\b\s*(\d{2,3}(?:\.\d)?)\s*%?",
+        r"(?:high distinction|distinction|credit|pass)\s*(?:grade\s*)?\(\s*(\d{2,3})\s*%\s*\)",
+        r"(\d{2,3}(?:\.\d)?)\s*%\s*(?:weighted\s+)?average",
         r"(?:minimum|at least)\D{0,25}?(\d{2,3})\s*%\D{0,20}(?:average|WAM|mark)",
     ]
     marks = [float(m.group(1)) for p in patterns if (m := re.search(p, text, re.I))]
