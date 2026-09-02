@@ -69,6 +69,30 @@ TypeError: Decompressor.decompress() got an unexpected keyword argument 'output_
 干净的 venv 里不会装上这个冲突的包，问题自然不存在。**这类问题多数不值得
 逐个去修版本号，换个干净环境更快。**
 
+### macOS 上还有一个坑：`No module named go8agent`
+
+装好之后如果报这个，但 `pip list` 里明明有 `go8agent`：
+
+```bash
+chflags -R nohidden .venv
+```
+
+原因是 macOS 的 `hidden` 文件标志。`python -m venv` 会给 venv 目录打上这个标志，
+里面新建的文件跟着继承。而 CPython 的 `site.addpackage()` 有这么一段：
+
+```python
+if ((getattr(st, 'st_flags', 0) & stat.UF_HIDDEN) or ...):
+    _trace(f"Skipping hidden .pth file: {fullname!r}")
+    return
+```
+
+**带 hidden 标志的 `.pth` 文件会被直接跳过**，于是可编辑安装写进去的
+`src` 路径进不了 `sys.path`。`pip list` 显示已安装、`.pth` 文件内容也正确，
+就是 import 不到——非常难猜。
+
+清掉根目录的标志后新装的包不会再被标记，这个操作做一次就够。
+实在懒得管也可以退回 `PYTHONPATH=src python3 -m go8agent ...`，那条路不受影响。
+
 ---
 
 ## 用法
