@@ -79,6 +79,9 @@ class Program(BaseModel):
     title: str
     level: Level = "other"
 
+    # handbook 年份。各校的 sitemap 同时挂着多个年份的页面，停办已久的项目
+    # 只存在于旧年份里——不记年份就会把停办项目当成在招项目推荐出去。
+    handbook_year: int | None = None
     cricos_code: str | None = None
     credit_points: int | None = None
     duration_full_time: str | None = None

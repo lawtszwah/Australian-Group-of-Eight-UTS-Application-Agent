@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from .db import Database
+from .eligibility import StudentProfile, check_eligibility, format_result
 from .fetch import SITEMAPS, Fetcher
 from .models import Program
 from .sources import courseloop
@@ -33,11 +34,17 @@ def _seed_file(university: str) -> Path:
 def cmd_discover(args: argparse.Namespace) -> int:
     SEED_DIR.mkdir(parents=True, exist_ok=True)
     with Fetcher(DATA_DIR, delay_seconds=args.delay) as fetcher:
-        entries = fetcher.discover(args.university, year=args.year)
+        entries, info = fetcher.discover(
+            args.university, year=args.year, all_years=args.all_years
+        )
     path = _seed_file(args.university)
     path.write_text(
         "\n".join(f"{code}\t{url}" for code, url in entries) + "\n", encoding="utf-8"
     )
+    print(f"sitemap 里出现的年份: {info.get('years_seen')}")
+    if info.get("target_year"):
+        print(f"采用年份: {info['target_year']}")
+        print(f"筛除只存在于旧年份的项目（视为已停办）: {info['dropped_stale']} 个")
     print(f"发现 {len(entries)} 个项目页 -> {path.relative_to(ROOT)}")
     return 0
 
@@ -147,6 +154,27 @@ def cmd_reparse(args: argparse.Namespace) -> int:
     return 0
 
 
+UNIVERSITY_LABELS = {"monash": "Monash University", "unsw": "UNSW Sydney"}
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    """清掉不在当前种子清单里的项目。
+
+    种子清单只含最新年份的页面，所以清掉的基本是已停办的项目。
+    把它们留在库里，agent 就可能推荐一个早就不招生的项目。
+    """
+    codes = {code for code, _ in _load_seeds(args.university, None, None)}
+    db = Database(DB_PATH)
+    removed = db.prune(UNIVERSITY_LABELS[args.university], codes)
+    db.close()
+    print(f"清除 {len(removed)} 个不在当前 handbook 年份里的项目（视为已停办）")
+    for key in removed[:10]:
+        print(f"  - {key}")
+    if len(removed) > 10:
+        print(f"  ... 另有 {len(removed) - 10} 个")
+    return 0
+
+
 def cmd_search(args: argparse.Namespace) -> int:
     db = Database(DB_PATH)
     rows = db.search(
@@ -190,7 +218,7 @@ def cmd_changes(args: argparse.Namespace) -> int:
 
 
 EXPORT_COLUMNS = [
-    "program_key", "university", "code", "title", "level", "faculty",
+    "program_key", "university", "code", "title", "level", "faculty", "handbook_year",
     "cricos_code", "credit_points", "duration_full_time", "campus", "intakes",
     "ielts_overall", "ielts_min_band", "toefl_ibt", "pte_overall",
     "min_wam_percent", "min_grade_band", "requires_cognate_degree",
@@ -271,6 +299,30 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check(args: argparse.Namespace) -> int:
+    """判断某个学生背景能不能申某个项目。纯本地计算，不调模型。"""
+    db = Database(DB_PATH)
+    program = db.get(args.program_key)
+    if program is None:
+        print(f"库里没有 {args.program_key}，先跑 crawl 或用 search 查代码", file=sys.stderr)
+        return 1
+
+    profile = StudentProfile(
+        wam_percent=args.wam,
+        ielts_overall=args.ielts,
+        ielts_min_band=args.ielts_min,
+        has_cognate_background=args.cognate,
+        home_institution=args.institution,
+        work_experience_years=args.work_years,
+    )
+    result = check_eligibility(profile, program, borderline_margin=args.margin)
+    print(format_result(result))
+    # 退出码可用于脚本判断：0 达标 / 1 不达标 / 2 数据不足
+    return {"eligible": 0, "borderline": 0, "not_eligible": 1, "insufficient_data": 2}[
+        result.verdict.value
+    ]
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     db = Database(DB_PATH)
     stats = db.stats()
@@ -288,7 +340,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("discover", help="从 sitemap 发现所有项目页")
     p.add_argument("university", choices=sorted(SITEMAPS))
-    p.add_argument("--year", type=int, default=None, help="只保留指定年份，默认取最新年份")
+    p.add_argument("--year", type=int, default=None,
+                   help="指定 handbook 年份，默认取 sitemap 里最新的一年")
+    p.add_argument("--all-years", action="store_true",
+                   help="保留每个代码各自的最新年份（会混入已停办项目，仅历史对比用）")
     p.add_argument("--delay", type=float, default=1.5)
     p.set_defaults(func=cmd_discover)
 
@@ -327,6 +382,23 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("changes", help="查看字段变更历史")
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_changes)
+
+    p = sub.add_parser("prune", help="清除不在当前 handbook 年份里的项目（已停办）")
+    p.add_argument("university", choices=sorted(SITEMAPS))
+    p.set_defaults(func=cmd_prune)
+
+    p = sub.add_parser("check", help="判断某个背景能不能申某个项目（纯计算，不调模型）")
+    p.add_argument("program_key", help="如 monash:C6001")
+    p.add_argument("--wam", type=float, help="你的加权均分（百分制）")
+    p.add_argument("--ielts", type=float, help="雅思总分")
+    p.add_argument("--ielts-min", type=float, help="雅思最低单项分")
+    p.add_argument("--cognate", action=argparse.BooleanOptionalAction, default=None,
+                   help="本科是否为相关专业（--cognate / --no-cognate）")
+    p.add_argument("--institution", help="你的本科院校（暂不参与判定，仅提示）")
+    p.add_argument("--work-years", type=float, help="相关工作年限（暂不参与判定，仅提示）")
+    p.add_argument("--margin", type=float, default=3.0,
+                   help="高出分数线多少以内算「边缘」，默认 3.0。这是产品设定，非官方规则")
+    p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("export", help="导出结构化数据集（给 data 分支用）")
     p.add_argument("--out", default="export", help="输出目录，默认 ./export")

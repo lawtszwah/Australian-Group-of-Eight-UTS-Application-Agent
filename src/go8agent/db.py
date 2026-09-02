@@ -193,6 +193,20 @@ class Database:
         ).fetchone()
         return Program.model_validate_json(row["payload"]) if row else None
 
+    def prune(self, university: str, keep_codes: set[str]) -> list[str]:
+        """删除某校在当前种子清单之外的项目（多为已停办）。
+
+        返回被删掉的 program_key，供调用方展示——删数据这件事必须让用户看见。
+        """
+        rows = self.conn.execute(
+            "SELECT program_key, code FROM programs WHERE university = ?", (university,)
+        ).fetchall()
+        removed = [r["program_key"] for r in rows if r["code"] not in keep_codes]
+        for key in removed:
+            self.conn.execute("DELETE FROM programs WHERE program_key = ?", (key,))
+        self.conn.commit()
+        return removed
+
     def recent_changes(self, limit: int = 50) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM changes ORDER BY changed_at DESC, id DESC LIMIT ?", (limit,)

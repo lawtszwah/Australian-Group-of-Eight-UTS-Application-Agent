@@ -59,6 +59,14 @@ class TestMonash:
         assert monash.entry.requires_cognate_degree is False
         assert len(monash.entry.entry_levels) >= 2
 
+    def test_handbook_year_recorded(self, monash):
+        """必须记住这条数据来自哪一年的 handbook。
+
+        各校 sitemap 同时挂着多个年份，停办已久的项目只存在于旧年份里。
+        不记年份，就会把停办项目当成在招项目推荐出去。
+        """
+        assert monash.handbook_year == 2026
+
     def test_provenance(self, monash):
         assert monash.source_url.startswith("https://handbook.monash.edu")
         assert monash.source_updated_at is not None

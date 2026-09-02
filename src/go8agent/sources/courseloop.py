@@ -278,8 +278,11 @@ def parse(html: str, university: str, source_url: str, fetched_at: datetime | No
     if raw_cp and (m := re.search(r"\d+", raw_cp)):
         credit_points = int(m.group())
 
+    year_match = re.search(r"/(20\d\d)/", source_url)
+
     return Program(
         program_key=f"{university}:{code}",
+        handbook_year=int(year_match.group(1)) if year_match else None,
         university=UNIVERSITY_NAMES[university],
         source="courseloop",
         code=code,

@@ -108,8 +108,22 @@ class Fetcher:
     # ------------------------------------------------------------------
     # 项目发现：从 sitemap 里找出所有项目页，不用手工维护 URL 清单
     # ------------------------------------------------------------------
-    def discover(self, university: str, year: int | None = None) -> list[tuple[str, str]]:
-        """返回 [(code, url), ...]。"""
+    def discover(
+        self, university: str, year: int | None = None, all_years: bool = False
+    ) -> tuple[list[tuple[str, str]], dict]:
+        """从 sitemap 发现项目页，返回 ([(code, url), ...], 统计信息)。
+
+        **默认只保留最新一个年份的页面。**
+
+        各校 sitemap 同时挂着多个年份。早已停办的项目只存在于旧年份里，
+        如果按"每个代码取它自己的最新年份"来收，就会把 2021 年停办的项目
+        和 2027 年在招的项目混在一起——对申请人来说这是会造成实际损失的错误。
+
+        真正在招的项目一定会出现在最新年份的 sitemap 里，所以"只取最新年份"
+        同时也是一个天然的停办筛除条件。
+
+        all_years=True 可以关掉这个筛选（做历史对比时才需要）。
+        """
         if university not in SITEMAPS:
             raise ValueError(f"未知学校 {university}")
         pattern = URL_PATTERNS[university]
@@ -117,7 +131,8 @@ class Fetcher:
         index = self._client.get(SITEMAPS[university]).text
         sub_sitemaps = self._sitemap_locs(index)
 
-        found: dict[str, tuple[str, str]] = {}
+        # 先把所有 (年份, 代码, URL) 收齐，再决定保留哪些
+        all_found: list[tuple[int, str, str]] = []
         for sub in sub_sitemaps:
             try:
                 body = self.get(sub)
@@ -125,16 +140,33 @@ class Fetcher:
                 continue
             for loc in self._sitemap_locs(body):
                 match = pattern.match(loc)
-                if not match:
-                    continue
-                loc_year, code = match.group(1), match.group(2)
-                if year is not None and int(loc_year) != year:
-                    continue
-                # 同一 code 可能有多个年份，保留年份最大的
-                previous = found.get(code)
-                if previous is None or loc_year > previous[0]:
-                    found[code] = (loc_year, loc)
-        return sorted((code, url) for code, (_, url) in found.items())
+                if match:
+                    all_found.append((int(match.group(1)), match.group(2), loc))
+
+        if not all_found:
+            return [], {"target_year": None, "kept": 0, "dropped_stale": 0}
+
+        years = sorted({y for y, _, _ in all_found})
+        target = year if year is not None else max(years)
+
+        if all_years:
+            # 保留每个代码各自的最新年份（历史对比用）
+            newest: dict[str, tuple[int, str]] = {}
+            for y, code, loc in all_found:
+                if code not in newest or y > newest[code][0]:
+                    newest[code] = (y, loc)
+            entries = sorted((code, loc) for code, (_, loc) in newest.items())
+            return entries, {"target_year": None, "years_seen": years,
+                             "kept": len(entries), "dropped_stale": 0}
+
+        current = sorted({(code, loc) for y, code, loc in all_found if y == target})
+        stale_codes = {code for _, code, _ in all_found} - {c for c, _ in current}
+        return current, {
+            "target_year": target,
+            "years_seen": years,
+            "kept": len(current),
+            "dropped_stale": len(stale_codes),
+        }
 
     @staticmethod
     def _sitemap_locs(xml_text: str) -> list[str]:
