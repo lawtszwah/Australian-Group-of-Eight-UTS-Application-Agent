@@ -1,20 +1,20 @@
 {
-  "total": 891,
+  "total": 731,
   "by_university": {
-    "Monash University": 565,
-    "UNSW Sydney": 326
+    "Monash University": 459,
+    "UNSW Sydney": 272
   },
   "by_level": {
-    "bachelor": 180,
-    "graduate_certificate": 196,
-    "graduate_diploma": 81,
-    "master": 342,
-    "other": 55,
-    "research": 37
+    "bachelor": 170,
+    "graduate_certificate": 143,
+    "graduate_diploma": 65,
+    "master": 295,
+    "other": 22,
+    "research": 36
   },
   "missing_fields": {
-    "credit_points": 28,
-    "english": 377,
-    "entry_wam": 514
+    "credit_points": 27,
+    "english": 322,
+    "entry_wam": 447
   }
 }
