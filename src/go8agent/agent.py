@@ -28,7 +28,7 @@ import json
 import os
 from typing import Any, Literal
 
-from .config import load_dotenv
+from .config import require_api_key
 from .tools import dispatch, to_anthropic_tools, to_openai_tools
 
 Provider = Literal["deepseek", "anthropic"]
@@ -93,16 +93,9 @@ def run_deepseek(
     """手写的 agent loop。整个循环就这么点内容，值得读一遍。"""
     from openai import OpenAI
 
-    load_dotenv()
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "未设置 DEEPSEEK_API_KEY。\n"
-            "  方式一：在项目根目录建 .env 文件，写入 DEEPSEEK_API_KEY=sk-xxx\n"
-            "         （可先 cp .env.example .env 再填）\n"
-            "  方式二：在终端里 export DEEPSEEK_API_KEY='sk-xxx'\n"
-            "  密钥从 https://platform.deepseek.com 获取"
-        )
+    api_key = require_api_key(
+        "DEEPSEEK_API_KEY", "密钥从 https://platform.deepseek.com 获取（只在创建时显示一次）"
+    )
 
     client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
     messages: list[dict[str, Any]] = [
@@ -186,11 +179,9 @@ def run_anthropic(
     """
     from anthropic import Anthropic
 
-    load_dotenv()
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise RuntimeError(
-            "未设置 ANTHROPIC_API_KEY。可写进 .env 或在终端里 export。"
-        )
+    require_api_key(
+        "ANTHROPIC_API_KEY", "密钥从 https://console.anthropic.com 获取"
+    )
 
     client = Anthropic()
     messages: list[dict[str, Any]] = [{"role": "user", "content": question}]

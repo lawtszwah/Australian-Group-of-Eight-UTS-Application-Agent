@@ -230,3 +230,42 @@ class TestDotenv:
         from go8agent.config import load_dotenv
 
         assert load_dotenv(tmp_path / "nope.env") == []
+
+
+class TestApiKeyValidation:
+    """密钥格式不对时，要在发请求之前就说清楚原因。
+
+    没有这层校验，占位符会一路混进 HTTP 请求头，报出
+    「'ascii' codec can't encode characters in position 10-17」——
+    这个报错完全看不出真正原因是「你忘了填密钥」。
+    """
+
+    def test_placeholder_is_caught_with_actionable_message(self, monkeypatch):
+        import pytest
+        from go8agent.config import require_api_key
+
+        monkeypatch.setenv("GO8_FAKE_KEY", "sk-在这里填你的密钥")
+        with pytest.raises(RuntimeError, match="占位符"):
+            require_api_key("GO8_FAKE_KEY", "取密钥的地址")
+
+    def test_non_ascii_key_is_caught_before_http(self, monkeypatch):
+        import pytest
+        from go8agent.config import require_api_key
+
+        monkeypatch.setenv("GO8_FAKE_KEY", "sk-abc１２３")  # 全角数字
+        with pytest.raises(RuntimeError, match="非 ASCII"):
+            require_api_key("GO8_FAKE_KEY", "取密钥的地址")
+
+    def test_missing_key_explains_both_options(self, monkeypatch):
+        import pytest
+        from go8agent.config import require_api_key
+
+        monkeypatch.delenv("GO8_FAKE_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="(?s)方式一.*方式二"):
+            require_api_key("GO8_FAKE_KEY", "取密钥的地址")
+
+    def test_valid_key_passes(self, monkeypatch):
+        from go8agent.config import require_api_key
+
+        monkeypatch.setenv("GO8_FAKE_KEY", "sk-abc123def456")
+        assert require_api_key("GO8_FAKE_KEY", "x") == "sk-abc123def456"
