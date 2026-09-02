@@ -1,0 +1,19 @@
+# 抓取产物：快照体积大且可随时重新抓取，不进版本库
+data/
+*.db
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# 环境变量（以后放 ANTHROPIC_API_KEY）
+.env
+
+# macOS
+.DS_Store
