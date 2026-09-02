@@ -79,7 +79,14 @@ python -m go8agent reparse monash
 # 5. 导出结构化数据集（提交到 data 分支）
 python -m go8agent export
 
-# 6. 重抓之后看有什么变了
+# 6. 资格判断（纯本地计算，不调模型）
+python -m go8agent check monash:C6001 --wam 78 --ielts 6.5 --ielts-min 6.0 --no-cognate
+
+# 7. 自然语言提问（需要 ANTHROPIC_API_KEY）
+export ANTHROPIC_API_KEY=...
+python -m go8agent ask "双非 78 分、雅思 6.5，跨专业能申哪些 IT 硕士"
+
+# 8. 重抓之后看有什么变了
 python -m go8agent changes
 python -m go8agent stats
 ```
@@ -119,6 +126,8 @@ src/go8agent/
 ├── models.py              Pydantic 模型 + 数值合理性校验
 ├── fetch.py               限速抓取、sitemap 发现、快照存取
 ├── db.py                  SQLite、字段级变更历史、查询
+├── eligibility.py         资格判断（纯 Python，不调模型）
+├── agent.py               Claude 工具封装与 agent loop
 ├── cli.py                 命令行
 └── sources/courseloop.py  Monash + UNSW 解析器
 tests/
@@ -147,8 +156,8 @@ tests/
 - [x] 快照落盘 + 变更差分
 - [x] 回归测试
 - [ ] 中国院校分级分数线表（手工维护）
-- [ ] `check_eligibility` —— 纯代码算资格，不交给模型
-- [ ] Claude tool use：把查询函数暴露成 agent 工具
+- [x] `check_eligibility` —— 纯代码算资格，不交给模型
+- [x] Claude tool use：把查询函数暴露成 agent 工具
 - [ ] golden set 评估（30–50 条人工标注）
 - [ ] 扩展到 ANU / UQ / Adelaide / UTS
 - [ ] USYD / UWA（需浏览器渲染）

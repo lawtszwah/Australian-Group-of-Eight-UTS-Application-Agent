@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS programs (
     code              TEXT NOT NULL,
     title             TEXT NOT NULL,
     level             TEXT NOT NULL,
+    handbook_year     INTEGER,
     cricos_code       TEXT,
     credit_points     INTEGER,
     duration_full_time TEXT,
@@ -64,7 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_changes_key    ON changes(program_key);
 
 # 值得追踪变更的字段——录取要求相关的，改了必须有人看见
 TRACKED_FIELDS = [
-    "title", "level", "credit_points", "duration_full_time", "faculty",
+    "title", "level", "handbook_year", "credit_points", "duration_full_time", "faculty",
     "ielts_overall", "ielts_min_band", "min_wam_percent", "requires_cognate",
     "source_updated_at",
 ]
@@ -76,7 +77,22 @@ class Database:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """给已存在的表补上后加的列。
+
+        CREATE TABLE IF NOT EXISTS 对已存在的表不会做任何改动，所以新增字段
+        必须显式 ALTER。SQLite 没有 ADD COLUMN IF NOT EXISTS，只能先查再加。
+        """
+        existing = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(programs)").fetchall()
+        }
+        for column, ddl in [("handbook_year", "INTEGER")]:
+            if column not in existing:
+                self.conn.execute(f"ALTER TABLE programs ADD COLUMN {column} {ddl}")
 
     def close(self) -> None:
         self.conn.close()
@@ -96,6 +112,7 @@ class Database:
             "code": program.code,
             "title": program.title,
             "level": program.level,
+            "handbook_year": program.handbook_year,
             "cricos_code": program.cricos_code,
             "credit_points": program.credit_points,
             "duration_full_time": program.duration_full_time,

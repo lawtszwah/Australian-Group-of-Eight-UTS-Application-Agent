@@ -323,6 +323,21 @@ def cmd_check(args: argparse.Namespace) -> int:
     ]
 
 
+def cmd_ask(args: argparse.Namespace) -> int:
+    """用自然语言提问，由 Claude 调用工具作答。需要 ANTHROPIC_API_KEY。"""
+    # 延迟导入：没装 anthropic 或没配 key 的人，其余命令照样能用
+    from .agent import ask
+
+    try:
+        answer = ask(args.question, verbose=not args.quiet)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    print()
+    print(answer)
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     db = Database(DB_PATH)
     stats = db.stats()
@@ -382,6 +397,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("changes", help="查看字段变更历史")
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_changes)
+
+    p = sub.add_parser("ask", help="用自然语言提问（需要 ANTHROPIC_API_KEY）")
+    p.add_argument("question", help="问题，如「双非 78 分能申 Monash 的 IT 硕士吗」")
+    p.add_argument("--quiet", action="store_true", help="不打印工具调用过程")
+    p.set_defaults(func=cmd_ask)
 
     p = sub.add_parser("prune", help="清除不在当前 handbook 年份里的项目（已停办）")
     p.add_argument("university", choices=sorted(SITEMAPS))
