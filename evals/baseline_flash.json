@@ -1,0 +1,196 @@
+{
+  "provider": null,
+  "model": null,
+  "summary": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "errored": 0,
+    "pass_rate": 1.0,
+    "failures_by_kind": {},
+    "avg_tool_calls": 3.1
+  },
+  "results": [
+    {
+      "id": "E01-明确可申",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "check_program_eligibility",
+        "get_program_details"
+      ],
+      "answer": "按官网数据判断：**可以申请**，结论为「符合」(eligible)。\n\n**C6001 Master of Information Technology 的关键要求（来源：**[Monash Handbook C6001](https://handbook.monash.edu/2026/courses/C6001)**）：**\n\n- **学术成绩**：本科成绩至少 credit（60%）即可。你均分 78，满足 ✓\n- **专业背景**：不限 IT 专业，官网原文 \"a bachelor degree (or equivalent) **not necessarily in IT**\"。你非 IT 背景不影响 ✓（对应的是 **Entry level 1**，2 年全日制、96 学分，不是可减免学分的档）\n- **语言**：Level A，雅思 6.5（单项不低于 6.0），你达标 ✓\n\n**两点提醒：**\n1. 该项目有 2 个入学档次，学制和学费不同：Entry level 2（1.5 年）要求 IT 相关本科背景并修过 Java/Python 等特定课程。你的情况对应 Entry level 1（2 年）。\n2. 官网的 \"60% (or equivalent)\" 对中国学生最终要看你的本科院校属于哪个档（985/211/双非对应的等效分数线不同）。**这份院校分级名单不在 handbook 里**，本结论未纳入该因素——建议向 Monash 招生处或官方中国区代理确认等效均分。\n\n数据抓取于 2026-09-02，入学要求以学校官方公布为准。"
+    },
+    {
+      "id": "E02-卡线边缘",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "check_program_eligibility"
+      ],
+      "answer": "帮你查了 Monash **D6007 — Master of Educational and Developmental Psychology**，结论是 **borderline（学术分踩线达标，风险要留意）**。具体情况：\n\n**你的分数**\n- 学术成绩 ✅：要求均分不低于 70%，你 71%，刚过线（官网原文：\"at least a distinction (70%) average in fourth year psychology\"）\n- 语言成绩 ✅：雅思总分不低于 7.0、单项不低于 7.0，你总分 7.0、单项 7.0，正好达标\n- 专业背景 ⚠️：官网原文要求的是 **APAC 认证的心理学第四年学习**（如 graduate diploma 或相关学士学位中的第四年），且需在入学前 10 年内完成。官网没有明确说明如何衡量中国本科背景，这一点需要你自行与学校确认。\n\n**注意事项**\n- 你 71 分只比 70% 的线高 1 分，属于「达标但余量小」，而且官网的 \"or equivalent\" 意味着对不同院校（985/211/双非）可能有各自的等效分数线——这份中国院校分级名单不在 handbook 上，我们的数据里也没有，所以这次判定**没有纳入院校分级因素**。\n- 核心风险其实在于**心理学专业背景**是否被 APAC 认可，建议你向 Monash 招生办确认中国本科心理学学历的等效认定。\n\n来源：[https://handbook.monash.edu/2026/courses/D6007](https://handbook.monash.edu/2026/courses/D6007)"
+    },
+    {
+      "id": "E03-均分不够",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details",
+        "check_program_eligibility"
+      ],
+      "answer": "很遗憾，目前看**不符合**。\n\n## D6007 Master of Educational and Developmental Psychology（Monash）\n\n- **学术成绩：不达标 ❌** — 要求第四年心理学课程均分不低于 **70%**（distinction），你的加权均分 **65%**，差 **5 分**。\n- **语言成绩：达标 ✅** — 雅思总分 7.0、单项不低于 7.0，你的成绩正好满足。\n- **专业背景**：官网要求持有 APAC 认证的心理学第四年学习（如研究生文凭或荣誉学士学位），且需在最近 10 年内完成。国际学历需经 APS 评估。这一点官网未明确以\"限制本科专业\"的形式表述，tool 无法直接判定你的背景是否匹配。\n\n⚠️ 提醒：官网分数线通常是针对本地学历体系的写法，Monash 对中国院校（985/211/双非）有不同的等效分数线，而这份分级名单不在我们数据里，上面\"差 5 分\"的结论**未纳入院校分级因素**。也就是说，具体能否被考虑，最终以学校评估为准。\n\n来源：https://handbook.monash.edu/2026/courses/D6007\n\n需要的话，我可以帮你看看 Monash 其他均分要求更低或无需心理学背景的心理学相关硕士项目。"
+    },
+    {
+      "id": "E04-单项不够被总分掩盖",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details",
+        "check_program_eligibility"
+      ],
+      "answer": "结论：**目前不符合 Master of Journalism (A6008) 的录取要求**，卡在语言单项上。\n\n具体判定如下：\n\n| 维度 | 要求 | 你的情况 | 是否达标 |\n|---|---|---|---|\n| 学术均分 | 不低于 60%（credit 平均） | 80% | ✅ |\n| 专业背景 | 要求相关专业（含传媒/人文社科） | 传媒本科 | ✅ |\n| 雅思 | 总分 7.0，**单项不低于 6.5** | 总分 7.0，但写作 6.0 | ❌ 单项差 0.5 |\n\n语言这项卡的正是写作：官网要求 Monash Level C——IELTS (Academic) 7.0 overall, **no band lower than 6.5**。写作 6.0 不满足，即使总分达标也会被拒。\n\n另外提醒两点：\n\n1. **学术均分 80% 远超 60% 的最低门槛**，这点不用担心。不过该项目有 3 个入学档次（2 年/1.5 年/1 年），学制和学分不同——你有相关本科背景，可能符合 Entry level 2（1.5 年），建议到官网确认你对应哪一档。\n2. **院校分级提醒**：官网写的 \"60% (or equivalent)\" 对中国学生而言，\"or equivalent\" 才是关键，而 985/211/双非的分级名单不在 handbook 上，本次判定未纳入该因素。\n\n来源：https://handbook.monash.edu/2026/courses/A6008\n\n如果写作单项能提到 6.5，就基本够线了。需要的话我可以帮你查查其他语言考试（如 PTE 单项不低于 58）或该校其他写作要求更低的传媒类项目。"
+    },
+    {
+      "id": "E05-只有等级不许换算",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details"
+      ],
+      "answer": "UNSW 的 **Master of International Business (8371)** 官网原文对均分的要求是：\n\n> \"Applicants require a recognised undergraduate degree (or equivalent qualification) **with a credit average**, as determined by the UNSW Business School.\"\n\n来源：https://www.handbook.unsw.edu.au/postgraduate/programs/2027/8371\n\n需要提醒两点：\n\n1. 我们的数据里**没有**该项目对中国学历（985/211/双非）对应的具体百分制分数，只登载了 \"credit average\" 这一档。至于 credit 对应中国成绩单的多少分、以及院校分级如何换算，官网原文说 \"as determined by the UNSW Business School\"，需要到 UNSW 商学院官网的 entry requirements 页面核实。\n2. 该页面在我们的数据里也没有登载雅思要求，如需了解需另行核实。\n\n要我帮你拿你的均分和本科背景跑一下 eligibility 判定吗？"
+    },
+    {
+      "id": "E06-UNSW无语言要求",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details"
+      ],
+      "answer": "我查了 UNSW 官网 handbook 里这个项目的数据（Master of Construction Project Management，program 8121，2027 手册页）：\n\n**雅思要求：我们数据里没有这一项，官网手册页未登载英语要求。**\n\n工具返回的该项目数据中，学术均分要求有登载（相关专业学士学位，credit average，相当于 UNSW WAM 65；非相关专业学士加 2 年管理职级建筑行业经验也可），但 **English 语言要求字段为空**，官网原文里没有列雅思。\n\n建议到 UNSW 官网核实英语要求：\n- 项目手册页：https://www.handbook.unsw.edu.au/postgraduate/programs/2027/8121\n- 该校统一英语语言要求可到 UNSW「English language requirements」页面查看（具体 URL 我这边没有存，请从官网入口进入）。\n\n需要我帮你查这个项目的录取均分门槛，或者拿你的背景做个资格判断吗？"
+    },
+    {
+      "id": "E07-跨专业申cognate项目",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details",
+        "check_program_eligibility"
+      ],
+      "answer": "我用官方手册数据和资格判定工具核了 Monash A6001（Master of Applied Linguistics），结果有一处需要你特别注意。\n\n**自动判定的结论是 not_eligible（暂不符合），但原因是\"专业背景\"一项**：\n- 学术成绩 ✅：加权均分 80%，远超最低门槛 60%\n- 语言 ✅：要求雅思总分 6.5、单项不低于 6.0（Monash Level A），你 7.0 / 单项 6.5 达标\n- 专业背景 ❌：你本科是机械工程，而该校定义的相关（cognate）专业是：语言学、应用语言学、语言学习或教学、翻译与口译、TESOL、言语病理学\n\n**但这里有个关键细节，必须提醒你**：官网原文显示该项目有 3 个入学档次——\n- Entry level 1（2 年全日制，96 学分）：只要求任意本科 + 60% 均分，**不要求相关专业背景**\n- Entry level 2（1.5 年）：要求相关专业本科 + 60% 均分\n- Entry level 3（1 年）：要求相关专业荣誉学位\n\n也就是说，机械工程背景申请**2 年制（Entry level 1）这一档**按官网原文是够格的；只有想走 1.5 年或 1 年的缩短学制，才会被非相关专业卡住。判定工具是按需相关背景的档次判的，所以给出了 not_eligible，并提示\"可考虑非相关背景入口或加长学制版本\"。\n\n另外注意两条：\n- 官网分数线都带 \"or equivalent\"，对中国院校（985/211/双非）的等效换算不在手册上，本结论未纳入院校分级因素。\n- 数据抓取于 2026-09-02，要求以学校最新公布为准。\n\n建议你按\"2 年制 Entry level 1\"向 Monash 确认，核实处：\nhttps://handbook.monash.edu/2026/courses/A6001\n\n需要的话，我也可以帮你查这个项目 1.5 年/1 年档的具体学制与学分安排。"
+    },
+    {
+      "id": "E08-明确不限专业",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details",
+        "check_program_eligibility"
+      ],
+      "answer": "可以，按我们数据里的判定，你的背景是**符合（eligible）**的。结论如下：\n\n**Monash Master of Cybersecurity (C6002)** — 2 年制，Clayton 校区\n\n- **学术成绩**：该项目对本科专业不限（\"not necessarily in IT\"），只需要达到 credit（60%）均分即可入读 Entry level 1。你的 78% 满足。✅\n- **语言成绩**：要求雅思 6.5 总分、单项不低于 6.0（Monash Level A）。你总分 6.5、单项 6.0，刚好达标。✅\n\n不过有两点要提醒你：\n\n1. **该项目有 2 个入学档次**：Entry level 1（2 年、96 学分，不限本科专业）和 Entry level 2（1.5 年、72 学分，要求计算机/软件工程等相关专业背景）。因为你是会计背景，你对应的应该是 Entry level 1 的 2 年档，学制学费以该档为准。\n2. **院校分级提醒**：官网的 60% 写的是 \"or equivalent\"，Monash 对中国院校（985/211/双非）会有不同的等效分数线，而这份分级名单不在 handbook 上，我们无法帮你核实。建议向 Monash 招生办或中国区代理确认你本科院校对应的等效要求。\n\n来源：[Monash Handbook 2026 – C6002](https://handbook.monash.edu/2026/courses/C6002)\n\n另外顺带一提：Monash 其实还有另一个 **Master of Cybersecurity (C6010)**（也在 Handbook 2026 上），如果你对这个也感兴趣，我可以帮你查它的入学要求。"
+    },
+    {
+      "id": "E09-官网无任何学术要求",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details"
+      ],
+      "answer": "Monash A6041 的全称是 **Master of Marketing and Digital Communications / Master of Cultural and Creative Industries**（双硕士课程）。\n\n我们数据库里能确认的信息：\n- 学历层次：硕士（Master）\n- 学制：2 年全日制\n- 学分：96 分\n- CRICOS 代码：093655B（对应 Cultural and Creative Industries 方向）\n- 手册年份：2026\n\n**关于入学要求（均分、雅思）**：我们的数据里这一项的官网信息**未登载（null）**，所以我们无法告诉您具体的均分或语言分数线——不是没有要求，而是官网页面上没有以结构化字段呈现。\n\n建议您到官网核实：https://handbook.monash.edu/2026/courses/A6041\n\n或者，如果您告诉我您的本科背景（均分、本科专业、雅思总分和单项分），我可以帮您调用资格评估工具判断是否符合——但前提是官网上有可依据的数据。需要的话请把您的具体情况发给我。"
+    },
+    {
+      "id": "E10-项目不存在",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs"
+      ],
+      "answer": "我检索了两校数据库，没有找到代码为 **Z9999** 的 Monash 项目。目前我们收录的 Monash 项目里没有这个代码，可能是项目代码记错了，或者不在我们收录的范围内。\n\n你可以：\n- 核对一下准确的项目代码或名称（例如 Monash 的项目通常是 C6001、E6008 这种字母+数字格式）；\n- 直接用专业或学院关键词（如 \"information technology\"、\"data science\"）让我帮你查。\n\n你告诉我项目的准确名称或方向，我再帮你查入学要求。"
+    },
+    {
+      "id": "E11-已停办项目",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details",
+        "search_programs",
+        "search_programs",
+        "search_programs"
+      ],
+      "answer": "我查了一下我们数据库里的 Monash 项目（共 731 个，数据来自官网手册），**没有检索到 A4005 这个代码**。我用代码精确搜索、以及 \"A400\" 前缀扩展搜索，返回的都是附近的代码（如 A4003、A4006、A4007、A4009），唯独没有 A4005。\n\n所以关于「是否招生」和「入学要求」，我们的数据里查不到，我不能凭记忆给你编。\n\n两个建议：\n1. 请确认一下代码是否有误（比如是否拼写/数字记错了），或者直接告诉我完整的课程名称，我再帮你搜一次；\n2. 如果确定是 A4005，可以到 Monash 课程手册页核对：https://handbook.monash.edu ——按课程代码搜索即可确认该项目是否存在及当年是否开放招生。\n\n需要的话，把确认后的名称或代码发我，我立刻帮你查详细入学要求。"
+    },
+    {
+      "id": "E12-信息不全时不许假设",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "get_program_details",
+        "check_program_eligibility"
+      ],
+      "answer": "你的雅思成绩这一关是满足的 ✅：\n\n- **语言要求**：Monash Level A——雅思总分 6.5、单项不低于 6.0。你总分 6.5、单项最低 6.0，达标。\n- 来源：[Monash Handbook – C6001](https://handbook.monash.edu/2026/courses/C6001)\n\n但**整体能否申请还无法下结论**，因为缺少一项关键信息：**你的本科加权均分**。\n\n该项目（Master of Information Technology，2 年制，96 学分）对学术成绩的要求是：本科不限专业，均分至少 **credit（60%）**。你的均分没提供，系统判不了学术这一关，所以整体结果是\"数据不足\"。\n\n另外提醒两点：\n1. 官网写的 \"60%\" 后附带 **\"(or equivalent)\"**——对中国申请者来说，Monash 会按你本科院校的层次（985/211/双非）折算等效分数线，这个名单不在 handbook 上，我这边也没有数据，需要向 Monash 招生处或中国区代理核实。\n2. 如果你本科是 IT/计算机等相关专业，且修过 Java/Python 编程、算法、计算机体系结构、操作系统与网络、数据库等课程，可能符合 **Entry level 2**（1.5 年制、72 学分），均分同样是 60%。\n\n把你的加权均分（百分制）告诉我，我可以帮你做一次完整的资格判定。"
+    },
+    {
+      "id": "E13-按条件检索",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "search_programs",
+        "search_programs",
+        "search_programs",
+        "search_programs",
+        "search_programs",
+        "search_programs",
+        "search_programs",
+        "check_program_eligibility",
+        "check_program_eligibility",
+        "check_program_eligibility",
+        "check_program_eligibility",
+        "check_program_eligibility"
+      ],
+      "answer": "查完了。结论很明确：**在你目前雅思 6.0 的条件下，Monash 的 IT 相关硕士没有一个够得着**——阻塞点全部在语言上。\n\n我核对了最相关的 5 个项目，判定结果一致，都是 **not_eligible**：\n\n| 项目 | 学术(60%门槛) | 语言(6.5/单项6.0) | 结论 |\n|---|---|---|---|\n| Master of Information Technology (C6001) | 70% ✓ | 6.0 ✗ (差0.5) | 不达标 |\n| Master of Data Science (C6004) | 70% ✓ | 6.0 ✗ | 不达标 |\n| Master of Artificial Intelligence (C6007) | 70% ✓ | 6.0 ✗ | 不达标 |\n| Master of Cybersecurity (C6002) | 70% ✓ | 6.0 ✗ | 不达标 |\n| Master of Business Information Systems (C6003) | 70% ✓ | 6.0 ✗ | 不达标 |\n\n学术上你的 70 分都超过了官网登载的 60% 最低门槛。但要提醒两点（来自工具返回的 caveats）：\n- 这些项目有 2 个入学档次（学制/学费不同），我比对的是最低门槛；\n- 官网写的是 \"credit (60%) average **or equivalent**\"，中国院校 985/211/双非 的等效分数线并不在 handbook 上，我的判定**没有纳入院校分级因素**。\n\n另外我用雅思 ≤6.0 过滤检索了 IT、computer、data science、software 等关键词下的全部 Monash 硕士，结果都是 0 条命中——也就是说我们数据库里 Monash 的 IT 类硕士登载的雅思要求全部是总分 6.5（单项不低于 6.0），无一低于你的分数。还有两条双学位记录（如 Master of Business Information Systems / Master of Global Business，C6015）数据里雅思项为 null，官网未登载，无法替你判断。\n\n**建议**：最直接的路径是把雅思提到总分 6.5（单项不低于 6.0）。是否提供语言班/衔接课程等替代方案，需到 Monash 官网的 English language requirements 页面核实，我们的数据里没有这一项。\n\n数据来源（官网原文依据）：\n- https://handbook.monash.edu/2026/courses/C6001\n- https://handbook.monash.edu/2026/courses/C6004\n- https://handbook.monash.edu/2026/courses/C6007\n- https://handbook.monash.edu/2026/courses/C6002\n- https://handbook.monash.edu/2026/courses/C6003\n\n需要我帮你把检索范围放宽到 UNSW，或者查一下 Monash 有没有研究生文凭/证书层级的 IT 项目吗？"
+    },
+    {
+      "id": "E14-研究生文凭不是硕士",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "search_programs",
+        "get_program_details"
+      ],
+      "answer": "**两个问题分开回答：**\n\n**1. Graduate Diploma 和 Master 不是一回事**\n\n- Graduate Diploma（研究生文凭）属于 **AQF 8** 层次；Master（硕士）属于 **AQF 9**，两者在学历层级、学分和通常的衔接设计上都不同。它们只是都排在本科之后，容易混。\n- 在我们的检索体系里，graduate_diploma 和 master 是两个分开的类别。\n\n**2. UNSW 5203 属于哪一类**\n\n我检索并核实了一下，UNSW 代码 5203 是：\n\n**Graduate Diploma in Translation and Interpreting（翻译与口译研究生文凭，GDipTI）**，类别为 **graduate_diploma（研究生文凭）**，不是硕士。\n\n其他从官网同步到的信息：\n- 48 学分（credit points）\n- 开学季：Term 1、Term 3\n- 校区：Sydney\n- 入学要求（官网原文）：任何学科的学士学位（或同等学历）+ 高级双语能力证明，例如用该语言完成 3 年以上的学位课程、或持有 NAATI 认证、或完成 UNSW 相关口笔译课程等。\n\n来源：https://www.handbook.unsw.edu.au/postgraduate/programs/2027/5203\n\n⚠️ 注意：这份数据里没有登载该项目的雅思和均分要求（官网原文里也未列出数值），如需了解语言/成绩要求，需要到上面的 handbook 页面或联系 UNSW 招生处核实。"
+    },
+    {
+      "id": "E15-数据里没有的字段",
+      "passed": true,
+      "error": null,
+      "failures": [],
+      "tools": [
+        "get_program_details"
+      ],
+      "answer": "我查了 Monash C6001（Master of Information Technology）的官网数据，但里面没有登载学费信息。\n\n目前能确认的信息如下：\n- 学制：2 年（全日制，96 学分），另有 1.5 年路径\n- 校区：Clayton\n- 入学均分要求：Entry level 1 本科非 IT 专业也可申请，credit (60%) 平均分\n- 英语要求（Level A）：IELTS 6.5（单项不低于 6.0）等\n- 官网：https://handbook.monash.edu/2026/courses/C6001\n\n学费这一项**我们的数据里没有**，需要你到 Monash 官网的费用页面核实（通常是课程介绍页的 \"Fees\" 部分，或 Monash Study 的费用查询工具）。不要凭第三方转述的数字做预算。"
+    }
+  ]
+}

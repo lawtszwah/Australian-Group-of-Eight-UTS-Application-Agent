@@ -70,6 +70,12 @@ SYSTEM_PROMPT = """你是澳洲留学申请助手，目前覆盖 Monash 和 UNSW
    官网写的 "65% (or equivalent)" 里，"or equivalent" 对中国学生才是关键，
    而那份分级名单不在我们的数据里。
 
+6. 加免责声明不等于可以说。不许写"该校通常是 6.5""一般要求 70 分左右"
+   这类带保留的记忆数字——哪怕你紧接着声明"仅供参考""以官网为准"也不行。
+   用户扫一眼记住的是那个数字，不是那句声明；而这个数字很可能是错的。
+   正确做法是只说"我们的数据里没有这一项，需到 XX 页面核实"，然后就停住，
+   不要补一个数字。
+
 用户说中文就用中文回答。回答要简洁，别堆砌无关信息。"""
 
 
@@ -78,6 +84,19 @@ def _log_call(round_index: int, name: str, arguments: dict[str, Any], verbose: b
         return
     shown = ", ".join(f"{k}={v!r}" for k, v in arguments.items() if v is not None)
     print(f"  [第 {round_index} 轮] 调用 {name}({shown})")
+
+
+def _record(trace: list[dict[str, Any]] | None, round_index: int, name: str,
+            arguments: dict[str, Any], result: str) -> None:
+    """记录一次工具调用，供评估打分用。
+
+    评估要判的不只是"最终答案对不对"，更重要的是"它有没有真的去查"。
+    一个凭记忆编出正确答案的模型，和一个查了工具的模型，可靠性天差地别——
+    前者只是这次蒙对了。没有 trace 就分不出这两者。
+    """
+    if trace is not None:
+        trace.append({"round": round_index, "tool": name,
+                      "args": arguments, "result": result})
 
 
 # =============================================================================
@@ -89,6 +108,7 @@ def run_deepseek(
     verbose: bool = True,
     max_rounds: int = MAX_TOOL_ROUNDS,
     model: str = DEEPSEEK_MODEL,
+    trace: list[dict[str, Any]] | None = None,
 ) -> str:
     """手写的 agent loop。整个循环就这么点内容，值得读一遍。"""
     from openai import OpenAI
@@ -147,9 +167,11 @@ def run_deepseek(
                     ensure_ascii=False,
                 )
                 _log_call(round_index, call.function.name, {}, verbose)
+                _record(trace, round_index, call.function.name, {}, result)
             else:
                 _log_call(round_index, call.function.name, arguments, verbose)
                 result = dispatch(call.function.name, arguments)
+                _record(trace, round_index, call.function.name, arguments, result)
 
             messages.append({
                 "role": "tool",
@@ -171,6 +193,7 @@ def run_anthropic(
     verbose: bool = True,
     max_rounds: int = MAX_TOOL_ROUNDS,
     model: str = ANTHROPIC_MODEL,
+    trace: list[dict[str, Any]] | None = None,
 ) -> str:
     """用同样的手写循环跑 Anthropic。
 
@@ -207,11 +230,14 @@ def run_anthropic(
         messages.append({"role": "assistant", "content": response.content})
         results = []
         for block in tool_uses:
-            _log_call(round_index, block.name, dict(block.input), verbose)
+            args = dict(block.input)
+            _log_call(round_index, block.name, args, verbose)
+            result = dispatch(block.name, args)
+            _record(trace, round_index, block.name, args, result)
             results.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
-                "content": dispatch(block.name, dict(block.input)),
+                "content": result,
             })
         messages.append({"role": "user", "content": results})
 
@@ -230,6 +256,7 @@ def ask(
     verbose: bool = True,
     max_rounds: int = MAX_TOOL_ROUNDS,
     model: str | None = None,
+    trace: list[dict[str, Any]] | None = None,
 ) -> str:
     """问一个问题，跑完 agent loop，返回最终回答。
 
@@ -240,7 +267,7 @@ def ask(
     """
     provider = provider or os.environ.get("GO8_PROVIDER", "deepseek")  # type: ignore[assignment]
     if provider == "deepseek":
-        return run_deepseek(question, verbose, max_rounds, model or DEEPSEEK_MODEL)
+        return run_deepseek(question, verbose, max_rounds, model or DEEPSEEK_MODEL, trace)
     if provider == "anthropic":
-        return run_anthropic(question, verbose, max_rounds, model or ANTHROPIC_MODEL)
+        return run_anthropic(question, verbose, max_rounds, model or ANTHROPIC_MODEL, trace)
     raise ValueError(f"未知 provider: {provider}（可选 deepseek / anthropic）")

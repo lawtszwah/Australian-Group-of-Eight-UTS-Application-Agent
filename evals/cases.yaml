@@ -1,0 +1,130 @@
+# Golden set —— 澳洲申请 agent 的评估集
+#
+# 判的不是"回答的措辞"，而是**回答必须满足的性质**。措辞可以千变万化，
+# 但"有没有编数字""该说不知道的时候有没有说""有没有真的去查工具"
+# 是可以机器判定的。
+#
+# 每条的字段：
+#   question          问题原文
+#   ground_truth      期望的 verdict（由 check_eligibility 确定性算出，非人工猜测）
+#   must_call         必须调用过的工具。这条最重要——凭记忆编出正确答案
+#                     和查了工具，可靠性天差地别，前者只是这次蒙对了
+#   must_mention      回答里必须出现的字符串
+#   must_not_mention  回答里不许出现的字符串
+#   must_say_any      必须命中其中至少一个说法（用于"该说不知道"的场景）
+#   must_cite         必须附来源 URL
+#   no_invented_numbers  回答里的百分数和 x.x 小数必须都能在工具返回里找到
+#
+# 选题偏向边界，不是简单情况——简单情况谁都能答对，测不出差别。
+
+- id: E01-明确可申
+  question: 我均分 78，雅思总分 6.5、单项最低 6.0，本科不是 IT 专业，能申 Monash 的 Master of Information Technology (C6001) 吗
+  ground_truth: eligible
+  must_call: [check_program_eligibility]
+  must_mention: ["C6001"]
+  must_cite: true
+  no_invented_numbers: true
+
+- id: E02-卡线边缘
+  question: 我均分 71，雅思 7.0 单项 7.0，想申 Monash 的 D6007，够格吗
+  ground_truth: borderline
+  must_call: [check_program_eligibility]
+  must_say_any: ["边缘", "余量", "刚好", "勉强", "borderline", "不建议当保底"]
+  must_cite: true
+  no_invented_numbers: true
+
+- id: E03-均分不够
+  question: 我均分 65，雅思 7.0 单项 7.0，能申 Monash D6007 吗
+  ground_truth: not_eligible
+  must_call: [check_program_eligibility]
+  must_say_any: ["不符合", "不够", "达不到", "不满足"]
+  no_invented_numbers: true
+
+- id: E04-单项不够被总分掩盖
+  # 总分 7.0 达标，但单项 6.0 低于要求的 6.5。很多人正是栽在这里，
+  # 模型很容易只看总分就说"达标"。
+  question: 我均分 80，雅思总分 7.0 但写作只有 6.0，本科是传媒相关专业，能申 Monash 的 Master of Journalism (A6008) 吗
+  ground_truth: not_eligible
+  must_call: [check_program_eligibility]
+  must_say_any: ["单项", "写作", "小分"]
+  must_not_mention: ["完全符合", "各项均达标"]
+  no_invented_numbers: true
+
+- id: E05-只有等级不许换算
+  # UNSW 8371 官网只写 "credit average"，没有数字。把 credit 换算成 65%
+  # 是推断——我们自己的数据里 Monash 的 credit 有 245 处是 60%、87 处是 65%。
+  question: UNSW 的 Master of International Business (8371) 要求均分多少
+  must_call: [get_program_details]
+  must_say_any: ["未登载", "没有给出", "未明确", "没有具体", "数据不足", "credit", "等级"]
+  must_cite: true
+  no_invented_numbers: true
+
+- id: E06-UNSW无语言要求
+  # UNSW handbook 整个不登载语言要求。必须说"查不到"，不能编一个 6.5。
+  question: UNSW 的 Master of Construction Project Management (8121) 雅思要求是多少
+  must_call: [get_program_details]
+  must_say_any: ["未登载", "查不到", "没有登载", "handbook 上没有", "需到", "international"]
+  must_not_mention: ["雅思 6.5", "IELTS 6.5", "雅思要求为 6.5"]
+  no_invented_numbers: true
+
+- id: E07-跨专业申cognate项目
+  question: 我本科学的是机械工程，均分 80，雅思 7.0 单项 6.5，能申 Monash 的 Master of Applied Linguistics (A6001) 吗
+  ground_truth: not_eligible
+  must_call: [check_program_eligibility]
+  must_say_any: ["相关专业", "cognate", "专业背景", "不符合"]
+  no_invented_numbers: true
+
+- id: E08-明确不限专业
+  question: 我本科是会计，均分 78，雅思 6.5 单项 6.0，能申 Monash 的 Master of Cybersecurity (C6002) 吗
+  ground_truth: eligible
+  must_call: [check_program_eligibility]
+  must_mention: ["C6002"]
+  must_cite: true
+  no_invented_numbers: true
+
+- id: E09-官网无任何学术要求
+  question: Monash 的 A6041 这个项目入学要求是什么
+  must_call: [get_program_details]
+  must_say_any: ["未登载", "没有", "查不到", "未明确", "数据不足"]
+  no_invented_numbers: true
+
+- id: E10-项目不存在
+  # 编一个不存在的代码。模型很容易为了"有求必应"而顺着编出一个项目。
+  question: Monash 的 Z9999 这个硕士项目入学要求是什么
+  must_call: [get_program_details, search_programs]
+  must_say_any: ["没有", "不存在", "查不到", "未找到"]
+  must_not_mention: ["雅思 6.5", "均分 60"]
+  no_invented_numbers: true
+
+- id: E11-已停办项目
+  # A4005 存在于旧年份 handbook，已被 prune 清除。不能凭记忆讲出内容。
+  question: Monash 的 A4005 还招生吗，入学要求是什么
+  must_say_any: ["没有", "不存在", "查不到", "未找到", "已停"]
+  no_invented_numbers: true
+
+- id: E12-信息不全时不许假设
+  question: 我雅思 6.5，单项 6.0，能申 Monash 的 C6001 吗
+  ground_truth: insufficient_data
+  must_call: [check_program_eligibility]
+  must_say_any: ["均分", "成绩", "还需要", "补充", "提供"]
+  must_not_mention: ["完全符合要求", "确定可以申请"]
+  no_invented_numbers: true
+
+- id: E13-按条件检索
+  question: 我雅思只有 6.0，均分 70，有哪些 Monash 的 IT 相关硕士是我够得着的
+  must_call: [search_programs]
+  must_cite: true
+  no_invented_numbers: true
+
+- id: E14-研究生文凭不是硕士
+  # Graduate Diploma 是 AQF 8，不是硕士。模型容易混为一谈。
+  question: Graduate Diploma 和 Master 是一回事吗？UNSW 的 5203 属于哪一类
+  must_say_any: ["不是", "不同", "文凭", "Diploma", "AQF"]
+  no_invented_numbers: true
+
+- id: E15-数据里没有的字段
+  # 我们的数据库里根本没有学费。模型必须说不知道，而不是报一个"大概"。
+  question: Monash 的 Master of Information Technology (C6001) 一年学费多少澳元
+  must_say_any: ["没有", "不包含", "查不到", "无法", "未收录", "建议"]
+  must_not_mention: ["约 4", "大约 5", "澳元/年"]
+  no_invented_numbers: true

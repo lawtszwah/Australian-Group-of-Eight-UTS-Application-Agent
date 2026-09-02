@@ -129,7 +129,11 @@ python -m go8agent ask "双非 78 分、雅思 6.5，跨专业能申哪些 IT �
 # 换供应商做对比（需要对应的 key）
 python -m go8agent ask "..." --provider anthropic
 
-# 8. 重抓之后看有什么变了
+# 8. 跑 golden set 评估（需要 API key，会产生费用）
+python -m go8agent eval --save evals/run.json
+python -m go8agent eval --only E06        # 只跑某几条
+
+# 9. 重抓之后看有什么变了
 python -m go8agent changes
 python -m go8agent stats
 ```
@@ -159,6 +163,42 @@ python -m go8agent stats
 也可能编造出 schema 里没有定义的参数」。`tools.dispatch()` 会在调用前校验
 参数名、类型和枚举值，失败时返回错误说明而不是抛异常——模型读到之后
 通常能自己改正重试。
+
+## 评估
+
+`evals/cases.yaml` 里是 15 条 golden set，判的不是回答的措辞，而是**回答必须
+满足的性质**：有没有真的调工具、该说"查不到"时有没有说、有没有编数字。
+
+所有评分器都是确定性的，没有用 LLM 当裁判——这是本项目的运气：
+`check_eligibility` 是纯代码，数据库里又有全部真实数字，所以这些都能机器判。
+
+最重要的两个评分器：
+
+| 评分器 | 判什么 | 为什么重要 |
+|---|---|---|
+| `must_call` | 有没有真的调工具 | 凭记忆蒙对和查了工具，可靠性天差地别 |
+| `no_invented_numbers` | 回答里的百分数和 x.x 小数是否都能在工具返回里找到 | 幻觉率，本项目的命门 |
+
+基线（`deepseek-v4-flash`，2026-09-02）：**15/15**，平均每题 3.1 次工具调用。
+
+### 这套评估抓到的真问题
+
+第一次跑时 E06 失败。该题问 UNSW 一个项目的雅思要求，而 UNSW handbook
+根本不登载语言要求。模型先正确地说了"官网未登载，不能替你编一个分数"，
+**然后又补了一句"该校通常统一要求雅思总分 6.5、单项 6.0，但这条我没有可靠
+数据来源"**。
+
+加免责声明并不能让数字变准——用户扫一眼记住的是 6.5/6.0，不是那句声明。
+为此在 system prompt 里加了第 6 条，明确禁止这种"带保留的记忆数字"。
+改完连跑三次都通过。
+
+**这就是有 eval 和没 eval 的区别**：这个问题人工抽查很难发现，因为回答
+读起来非常合理，甚至显得很谨慎。
+
+### 注意模型有随机性
+
+同一批题两次跑的结果会不同——第一次 E13 失败 E06 通过，第二次反过来。
+所以单次结果只能当参考，判断一个改动有没有效果应该重复跑几次。
 
 ## 分支约定
 
@@ -196,6 +236,7 @@ src/go8agent/
 ├── eligibility.py         资格判断（纯 Python，不调模型）
 ├── tools.py               工具实现、schema 与参数校验（与供应商无关）
 ├── agent.py               agent loop（DeepSeek / Anthropic 两套）
+├── evaluation.py          golden set 评分器
 ├── cli.py                 命令行
 └── sources/courseloop.py  Monash + UNSW 解析器
 tests/

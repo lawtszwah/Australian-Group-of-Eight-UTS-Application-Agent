@@ -338,6 +338,46 @@ def cmd_ask(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    """跑 golden set 评估。需要 API key，会产生费用。"""
+    from .evaluation import format_report, load_cases, run_case, summarize
+
+    cases = load_cases()
+    if args.only:
+        wanted = {c.strip() for c in args.only.split(",")}
+        cases = [c for c in cases if c.id in wanted or any(w in c.id for w in wanted)]
+        if not cases:
+            print(f"没有匹配 {args.only} 的用例", file=sys.stderr)
+            return 1
+
+    print(f"跑 {len(cases)} 条用例，provider={args.provider or '默认'} "
+          f"model={args.model or '默认'}\n")
+    results = []
+    for index, case in enumerate(cases, 1):
+        print(f"  ({index}/{len(cases)}) {case.id} ...", end="", flush=True)
+        result = run_case(case, args.provider, args.model)
+        results.append(result)
+        print(" PASS" if result.passed else (" ERROR" if result.error else " FAIL"))
+
+    summary = summarize(results)
+    print(format_report(results, summary))
+
+    if args.save:
+        path = Path(args.save)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "provider": args.provider, "model": args.model,
+            "summary": summary,
+            "results": [
+                {"id": r.case.id, "passed": r.passed, "error": r.error,
+                 "failures": r.failures, "tools": r.tools_called, "answer": r.answer}
+                for r in results
+            ],
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n详细结果 -> {path}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     db = Database(DB_PATH)
     stats = db.stats()
@@ -405,6 +445,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default=None, help="覆盖默认模型名")
     p.add_argument("--quiet", action="store_true", help="不打印工具调用过程")
     p.set_defaults(func=cmd_ask)
+
+    p = sub.add_parser("eval", help="跑 golden set 评估（需要 API key，会产生费用）")
+    p.add_argument("--provider", choices=["deepseek", "anthropic"], default=None)
+    p.add_argument("--model", default=None, help="覆盖默认模型名")
+    p.add_argument("--only", default=None, help="只跑匹配的用例，逗号分隔，如 'E05,E06'")
+    p.add_argument("--save", default=None, help="把详细结果存成 JSON，如 evals/run.json")
+    p.set_defaults(func=cmd_eval)
 
     p = sub.add_parser("prune", help="清除不在当前 handbook 年份里的项目（已停办）")
     p.add_argument("university", choices=sorted(SITEMAPS))

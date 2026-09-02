@@ -182,7 +182,8 @@ class TestAgainstRealData:
 
 class TestSystemPrompt:
     def test_states_the_core_rules(self):
-        for rule in ["不许凭记忆", "insufficient_data", "来源 URL", "or equivalent"]:
+        for rule in ["不许凭记忆", "insufficient_data", "来源 URL", "or equivalent",
+                     "加免责声明不等于可以说"]:
             assert rule in SYSTEM_PROMPT, f"system prompt 里缺少「{rule}」这条约束"
 
 
