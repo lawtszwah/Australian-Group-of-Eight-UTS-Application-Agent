@@ -1,22 +1,7 @@
-# 抓取产物与数据集：全部走 data 分支，main 只放代码
-# （tests/fixtures/ 里的两个页面快照除外——那是回归测试的基准，属于测试代码）
+# data 分支只放数据集，不放代码（代码在 main）
+# 原始 HTML 快照不入库：可随时重抓，且每次抓取都会新增一批带时间戳的文件
 data/
-seeds/
-export/
 *.db
 *.log
-
-# Python
 __pycache__/
-*.py[cod]
-.venv/
-venv/
-*.egg-info/
-.pytest_cache/
-.ruff_cache/
-
-# 环境变量（以后放 ANTHROPIC_API_KEY）
-.env
-
-# macOS
 .DS_Store

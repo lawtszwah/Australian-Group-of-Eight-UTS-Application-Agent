@@ -1,161 +1,72 @@
-# 澳洲八大 + UTS 申请 Agent
+# 数据分支
 
-一个用来练手 agent 开发的项目：给定学生背景，输出可申项目、差距分析和申请时间线。
+本分支只放抓取产出的数据集，**不放代码**。代码在 [`main`](../../tree/main)。
 
-当前进度：**阶段一 — 数据层（Monash + UNSW）**
+产出该数据集的代码版本：`3d94f36`
+抓取日期：2026-09-02
 
----
+## 文件
 
-## 为什么先做数据层
-
-这类项目的成败不在 agent 框架，而在数据。澳洲高校的录取要求会变、有院校分级、
-措辞含糊（"or equivalent"）。**让模型凭记忆生成分数线，答案基本都是错的。**
-
-所以整个项目围绕一条规则设计：
-
-> 模型不许自己产出录取要求，只能通过工具查询本地数据库；
-> 每条结论必须能追溯到来源 URL 和原文片段。
-
-`Program.gaps()` 会标出哪些字段没解析出来。解析不出来就是 `None`，
-下游 agent 看到 `None` 会说"未查到"——这远好过一个编出来的数字。
-
----
-
-## 为什么先做 Monash 和 UNSW
-
-实测了九所学校的课程页形态，差异很大：
-
-| 学校 | 页面形态 | 难度 |
-|---|---|---|
-| **Monash** | Next.js，`__NEXT_DATA__` 内嵌结构化 JSON | ⭐ |
-| **UNSW** | 同一个 handbook 平台，**schema 完全一致** | ⭐ |
-| ANU | 服务端渲染 HTML | ⭐⭐ |
-| UQ / Adelaide / UTS | 服务端渲染，需解析 HTML | ⭐⭐ |
-| USYD / UWA | SPA，需浏览器渲染 | ⭐⭐⭐ |
-| UniMelb | 返回 403 且挂反爬脚本 | 手工录入 |
-
-Monash 和 UNSW 用同一个 CourseLoop handbook 平台，**一个解析器同时吃两所学校**，
-是投入产出比最高的起点。
-
-UniMelb 明确拒绝自动访问，本项目不做任何绕过，改为人工录入。
-
----
-
-## 安装
-
-```bash
-pip install -e ".[dev]"
-```
-
-或直接用仓库自带依赖（只需要 `httpx` 和 `pydantic`）：
-
-```bash
-PYTHONPATH=src python3 -m go8agent --help
-```
-
----
-
-## 用法
-
-```bash
-# 1. 从 sitemap 发现所有项目页（Monash 565 个，UNSW 326 个）
-python -m go8agent discover monash
-python -m go8agent discover unsw
-
-# 2. 全量抓取并入库。约 900 个页面，串行 1.2 秒间隔，20 分钟左右
-python -m go8agent crawl monash --limit 9999 --max-fetch 9999
-
-# 定向抓几个也行
-python -m go8agent crawl monash --codes C6001,C6003
-
-# 3. 查询（这些查询以后会直接变成 agent 的 tool）
-python -m go8agent search --keyword "information technology" --level master
-python -m go8agent search --max-ielts 6.5 --max-wam 70   # 我的条件够得着哪些
-python -m go8agent show monash:C6001
-
-# 4. 改完解析逻辑后，用本地快照重跑，不碰学校服务器
-python -m go8agent reparse monash
-
-# 5. 导出结构化数据集（提交到 data 分支）
-python -m go8agent export
-
-# 6. 重抓之后看有什么变了
-python -m go8agent changes
-python -m go8agent stats
-```
-
----
-
-## 分支约定
-
-| 分支 | 内容 |
+| 文件 | 说明 |
 |---|---|
-| `main` | 只放代码。`seeds/`、`data/`、`export/` 都被 gitignore |
-| `data` | 抓取产出的数据集：`programs.json`、`programs.csv`、`coverage.json`、`seeds/` |
+| `export/programs.json` | 完整数据集，含入学要求原文（`entry.raw` / `english.raw`），供人工核对与重新解析 |
+| `export/programs.csv` | 一行一个项目的表格版，可直接在 GitHub 上浏览 |
+| `export/coverage.json` | 覆盖率统计，含各字段缺失数 |
+| `seeds/*.tsv` | 从各校 sitemap 发现的项目页清单（代码 + URL） |
 
-`data` 是一条 orphan 分支（独立历史，不含代码），这样数据的提交记录不会和代码
-的提交记录搅在一起。原始 HTML 快照**不入库**——可随时重抓，且每次抓取都会新增
-一批带时间戳的文件，提交进去会让仓库无限膨胀。
-
-导出的 JSON 按 key 排序、缩进固定，所以 `git diff` 是逐字段可读的：
+`programs.json` 按 key 排序、缩进固定，所以 `git diff` 是逐字段可读的——
 下次重抓能直接看出「哪个项目的哪条要求变了」。
 
-## 架构
+## 数据概况
 
-```
-sitemap 发现  ->  抓取(限速)  ->  快照落盘  ->  解析  ->  校验  ->  SQLite  ->  差分
-                                    |                                          |
-                            原始 HTML 存 data/                        改了什么字段留痕
-```
+891 个项目，来自两校 handbook：
 
-两条硬规则：
+| 学校 | 项目数 |
+|---|---|
+| Monash University | 565 |
+| UNSW Sydney | 326 |
 
-1. **原始快照必须落盘。** 解析逻辑以后一定会改，到时候跑 `reparse` 就行，
-   不用重新请求学校服务器。既省事，也是基本礼貌。
-2. **串行 + 固定间隔。** 总共几百个页面，没有任何理由并发轰炸。
+| 学历层次 | 数量 |
+|---|---|
+| 硕士 (AQF 9) | 342 |
+| 研究生文凭/证书 (AQF 8) | 277 |
+| 本科 | 180 |
+| 研究型 | 37 |
+| 其他 | 55 |
 
-```
-src/go8agent/
-├── models.py              Pydantic 模型 + 数值合理性校验
-├── fetch.py               限速抓取、sitemap 发现、快照存取
-├── db.py                  SQLite、字段级变更历史、查询
-├── cli.py                 命令行
-└── sources/courseloop.py  Monash + UNSW 解析器
-tests/
-├── fixtures/              真实页面快照（离线，测试不联网）
-└── test_courseloop.py     回归测试
-```
+硕士入学要求可用率（占原文非空的项目）：Monash 87%，UNSW 46%。
 
----
+## 字段说明
 
-## 已知边界
+| 字段 | 含义 |
+|---|---|
+| `program_key` | 全库唯一主键，如 `monash:C6001` |
+| `entry.min_wam_percent` | 最低加权均分，**页面上明确写了数字才有值** |
+| `entry.min_grade_band` | 成绩等级（`credit` / `distinction` 等），页面只给等级没给数字时使用 |
+| `entry.raw` | 入学要求原文，一切结构化字段的依据 |
+| `english.ielts_overall` | 雅思总分要求 |
+| `source_url` | 来源页面 |
+| `source_updated_at` | 学校自己标注的数据更新时间 |
+| `fetched_at` | 本次抓取时间 |
 
-- **UNSW handbook 不登载语言要求**，解析结果里 `english` 恒为 `None`，
-  `gaps()` 会标出来。语言要求在 UNSW 的 international 站点上，属于待补数据源。
-- **官网只给笼统要求。** UNSW 8543 的原文是 "weighted average mark of 65%
-  **(or equivalent)**"——对中国学生来说 "or equivalent" 才是关键信息，
-  而它不在这个页面上。
-- **院校分级分数线（985 / 211 / 双非）爬不到**，多在各校 country-specific
-  页面或 PDF 里，部分不公开。这部分计划走独立的手工维护表，
-  和爬虫管线分开，标注来源和核实日期。
+## 三条必须知道的边界
 
----
+**1. `null` 表示"未查到"，不是"没有要求"。**
+解析不出来的字段一律留 `null`。这是刻意设计的：下游 agent 看到 `null`
+会说"未查到"，看到一个编出来的数字则会一本正经地误导用户。
 
-## 路线图
+**2. `min_grade_band` 没有被换算成百分数。**
+UNSW 大量项目写的是 "with a credit average"，页面上没有数字。
+`credit = 65%` 是一条广为人知的换算，但它**不在页面上**，属于推断。
+需要换算时请在下游显式进行，并标明这是推断。
 
-- [x] CourseLoop 解析器（Monash + UNSW）
-- [x] 快照落盘 + 变更差分
-- [x] 回归测试
-- [ ] 中国院校分级分数线表（手工维护）
-- [ ] `check_eligibility` —— 纯代码算资格，不交给模型
-- [ ] Claude tool use：把查询函数暴露成 agent 工具
-- [ ] golden set 评估（30–50 条人工标注）
-- [ ] 扩展到 ANU / UQ / Adelaide / UTS
-- [ ] USYD / UWA（需浏览器渲染）
-
----
+**3. 这里没有中国院校分级分数线。**
+UNSW 8543 的官方原文是 "weighted average mark of 65% **(or equivalent)**"
+——对中国学生来说 "or equivalent" 才是关键信息，而它不在 handbook 上。
+985 / 211 / 双非的分级名单多在各校 country-specific 页面或 PDF 里，
+部分不公开。那部分计划走独立的手工维护表，与本数据集分开。
 
 ## 免责
 
-数据抓自各校公开 handbook，仅供参考。入学要求以学校官方公布为准。
+数据抓自各校公开 handbook，仅供参考，入学要求以学校官方公布为准。
 每条记录都带 `source_url` 和 `fetched_at`，请自行核实时效性。
