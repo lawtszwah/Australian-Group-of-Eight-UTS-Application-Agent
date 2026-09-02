@@ -43,15 +43,31 @@ UniMelb 明确拒绝自动访问，本项目不做任何绕过，改为人工录
 
 ## 安装
 
-```bash
-pip install -e ".[dev]"
-```
-
-或直接用仓库自带依赖（只需要 `httpx` 和 `pydantic`）：
+**用项目独立的虚拟环境，不要装在 anaconda base 里。**
 
 ```bash
-PYTHONPATH=src python3 -m go8agent --help
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m go8agent --help
 ```
+
+想少敲几个字就先激活：`source .venv/bin/activate`，之后直接用 `python -m go8agent`。
+
+### 为什么强调这一点
+
+在 anaconda base 里跑会撞上一个很难看懂的报错：
+
+```
+TypeError: Decompressor.decompress() got an unexpected keyword argument 'output_buffer_limit'
+→ openai.APIConnectionError: Connection error.
+```
+
+原因是 base 环境里 conda 和 pip 的包混装：`httpx2` 解压响应时传了
+`output_buffer_limit=`，而同环境里那个版本的 `brotlicffi` 不接受这个参数。
+表面看是"连接错误"，实际和网络毫无关系。
+
+干净的 venv 里不会装上这个冲突的包，问题自然不存在。**这类问题多数不值得
+逐个去修版本号，换个干净环境更快。**
 
 ---
 
