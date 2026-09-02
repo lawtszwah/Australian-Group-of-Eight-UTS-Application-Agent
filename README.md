@@ -83,7 +83,7 @@ python -m go8agent export
 python -m go8agent check monash:C6001 --wam 78 --ielts 6.5 --ielts-min 6.0 --no-cognate
 
 # 7. 自然语言提问
-export DEEPSEEK_API_KEY=...          # 默认供应商
+cp .env.example .env                 # 然后把真实密钥填进 .env
 python -m go8agent ask "双非 78 分、雅思 6.5，跨专业能申哪些 IT 硕士"
 
 # 换供应商做对比（需要对应的 key）
@@ -110,6 +110,10 @@ python -m go8agent stats
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-5` |
 
 用 `GO8_PROVIDER` 或 `--provider` 切换。
+
+密钥放项目根目录的 `.env`（`cp .env.example .env` 后填写）。
+`.env` 已在 `.gitignore` 里，不会被提交。真实环境变量优先级高于 `.env`，
+所以临时 `export` 一个别的 key 可以立刻覆盖，不用改文件。
 
 **参数校验不是可选项。** DeepSeek 官方文档明确写着模型「不一定生成合法 JSON，
 也可能编造出 schema 里没有定义的参数」。`tools.dispatch()` 会在调用前校验

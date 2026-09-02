@@ -184,3 +184,49 @@ class TestSystemPrompt:
     def test_states_the_core_rules(self):
         for rule in ["不许凭记忆", "insufficient_data", "来源 URL", "or equivalent"]:
             assert rule in SYSTEM_PROMPT, f"system prompt 里缺少「{rule}」这条约束"
+
+
+class TestDotenv:
+    """.env 加载的边界行为。"""
+
+    def test_parses_quotes_and_comments(self, tmp_path):
+        from go8agent.config import load_dotenv
+
+        env = tmp_path / ".env"
+        env.write_text(
+            "# 注释行\n"
+            "\n"
+            "PLAIN=abc\n"
+            "SINGLE='sk-single'\n"
+            "DOUBLE=\"sk-double\"\n"
+            "WITH_SPACES = spaced \n",
+            encoding="utf-8",
+        )
+        import os
+
+        for key in ["PLAIN", "SINGLE", "DOUBLE", "WITH_SPACES"]:
+            os.environ.pop(key, None)
+        load_dotenv(env)
+        assert os.environ["PLAIN"] == "abc"
+        assert os.environ["SINGLE"] == "sk-single"
+        assert os.environ["DOUBLE"] == "sk-double"
+        assert os.environ["WITH_SPACES"] == "spaced"
+        for key in ["PLAIN", "SINGLE", "DOUBLE", "WITH_SPACES"]:
+            os.environ.pop(key, None)
+
+    def test_real_env_wins_over_dotenv(self, tmp_path):
+        """真实环境变量优先——临时 export 一个别的 key 就能立刻生效。"""
+        from go8agent.config import load_dotenv
+        import os
+
+        os.environ["GO8_TEST_KEY"] = "from-shell"
+        env = tmp_path / ".env"
+        env.write_text("GO8_TEST_KEY=from-dotenv\n", encoding="utf-8")
+        load_dotenv(env)
+        assert os.environ["GO8_TEST_KEY"] == "from-shell"
+        os.environ.pop("GO8_TEST_KEY", None)
+
+    def test_missing_file_is_not_an_error(self, tmp_path):
+        from go8agent.config import load_dotenv
+
+        assert load_dotenv(tmp_path / "nope.env") == []
