@@ -340,6 +340,125 @@ def cmd_ask(args: argparse.Namespace) -> int:
     return 0
 
 
+CHAT_HELP = """对话中可用的命令：
+  /help            这份帮助
+  /reset           清空上下文，重新开一段（累计用量不清零）
+  /history         看当前上下文里还剩哪些消息
+  /usage           看这次会话花了多少 token 和钱
+  /save <路径>     把整段对话（含工具调用）存成 JSON
+  /exit            退出（Ctrl-D 同样）
+"""
+
+
+def _print_usage(conversation) -> None:
+    from .evaluation import estimate_cost
+
+    usage = conversation.usage
+    if not usage:
+        print("还没有调用过模型")
+        return
+    parts = ", ".join(f"{k}={v}" for k, v in sorted(usage.items()))
+    print(f"用量: {parts}")
+    cost = estimate_cost(conversation.model, usage)
+    if cost is not None:
+        print(f"估算花费: ${cost:.4f}")
+
+
+def _print_history(conversation) -> None:
+    """把上下文摊开给人看。
+
+    多轮里最常见的困惑是"它为什么忘了前面说过的"——多半是被裁掉了。
+    与其让人猜，不如把还剩什么、丢了几轮直接打出来。
+    """
+    if conversation.dropped_turns:
+        print(f"（最早的 {conversation.dropped_turns} 轮已被裁掉，不在上下文里）")
+    for message in conversation.serialize()["history"]:
+        role = message.get("role")
+        content = message.get("content")
+        if isinstance(content, list):
+            kinds = [b.get("type", "?") if isinstance(b, dict) else "?" for b in content]
+            body = f"[{', '.join(kinds)}]"
+        else:
+            body = (content or "").replace("\n", " ")
+        if message.get("tool_calls"):
+            body += " -> " + ", ".join(
+                c["function"]["name"] for c in message["tool_calls"]
+            )
+        print(f"  {role:9} {body[:100]}")
+    print(f"共 {conversation.turns} 轮在上下文里")
+
+
+def cmd_chat(args: argparse.Namespace) -> int:
+    """多轮对话。上下文留在内存里，退出即消失。"""
+    from .agent import Conversation
+
+    conversation = Conversation(
+        provider=args.provider,
+        model=args.model,
+        max_history_turns=args.history_turns,
+        verbose=not args.quiet,
+    )
+    print(f"多轮对话（{conversation.provider} / {conversation.model}），"
+          f"上下文保留最近 {conversation.max_history_turns} 轮。/help 看命令，/exit 退出。")
+
+    pending = args.question
+    while True:
+        if pending is None:
+            try:
+                line = input("\n你 > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+        else:
+            line, pending = pending, None
+            print(f"\n你 > {line}")
+
+        if not line:
+            continue
+
+        if line.startswith("/"):
+            command, _, rest = line.partition(" ")
+            if command in ("/exit", "/quit"):
+                break
+            if command == "/help":
+                print(CHAT_HELP)
+            elif command == "/reset":
+                conversation.reset()
+                print("上下文已清空")
+            elif command == "/history":
+                _print_history(conversation)
+            elif command == "/usage":
+                _print_usage(conversation)
+            elif command == "/save":
+                path = Path(rest.strip() or "conversation.json")
+                path.write_text(
+                    json.dumps(conversation.serialize(), ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                print(f"已存到 {path}")
+            else:
+                print(f"未知命令 {command}，/help 看可用命令")
+            continue
+
+        try:
+            answer = conversation.send(line)
+        except KeyboardInterrupt:
+            # 这一轮已经被 Conversation 回滚掉了，接着聊就行
+            print("\n（已中断本轮，上下文保持在上一轮结束时的状态）")
+            continue
+        except (RuntimeError, ValueError) as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        except Exception as exc:  # noqa: BLE001 - 网络/API 出错不该让整段对话丢掉
+            print(f"这一轮失败了：{exc}", file=sys.stderr)
+            continue
+        print()
+        print(answer)
+
+    _print_usage(conversation)
+    return 0
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     """跑 golden set 评估。需要 API key，会产生费用。"""
     from .evaluation import format_report, load_cases, run_case, summarize
@@ -521,6 +640,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default=None, help="覆盖默认模型名")
     p.add_argument("--quiet", action="store_true", help="不打印工具调用过程")
     p.set_defaults(func=cmd_ask)
+
+    p = sub.add_parser("chat", help="多轮对话（上下文只存在内存里）")
+    p.add_argument("question", nargs="?", default=None, help="可选：第一句话，省得进去再打一遍")
+    p.add_argument("--provider", choices=["deepseek", "anthropic"], default=None,
+                   help="模型供应商，默认读环境变量 GO8_PROVIDER，再默认 deepseek")
+    p.add_argument("--model", default=None, help="覆盖默认模型名")
+    p.add_argument("--history-turns", type=int, default=8,
+                   help="上下文保留最近多少轮，超出按整轮丢弃（默认 8）")
+    p.add_argument("--quiet", action="store_true", help="不打印工具调用过程")
+    p.set_defaults(func=cmd_chat)
 
     p = sub.add_parser("eval", help="跑 golden set 评估（需要 API key，会产生费用）")
     p.add_argument("--provider", choices=["deepseek", "anthropic"], default=None)
