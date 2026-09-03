@@ -20,6 +20,12 @@ Anthropic SDK 有 tool_runner 能自动跑完循环；DeepSeek 走 OpenAI 兼容
 而且手写这个循环对入门是好事：agent loop 的全部内容就是
 「发消息 -> 看有没有 tool_call -> 执行 -> 把结果塞回去 -> 再发」，
 亲手写一遍就不会再把它当黑箱。
+
+=============================================================================
+多轮对话
+=============================================================================
+一段对话的全部状态就是一个 history 列表，见 Conversation。单轮的 ask() 只是
+「用一次就扔的 Conversation」，所以两条路走的是同一份代码。
 """
 
 from __future__ import annotations
@@ -76,14 +82,20 @@ SYSTEM_PROMPT = """你是澳洲留学申请助手，目前覆盖 Monash 和 UNSW
    正确做法是只说"我们的数据里没有这一项，需到 XX 页面核实"，然后就停住，
    不要补一个数字。
 
+7. 多轮对话里用户会用指代（"这个项目""那它呢""第二个"）。指代必须落到明确的
+   program_key 再查工具；如果上文里有多个候选、你不确定指的是哪一个，就直接问
+   用户，不要挑一个来猜。猜错的代价是给出另一个项目的分数线，比多问一句糟得多。
+
 用户说中文就用中文回答。回答要简洁，别堆砌无关信息。"""
 
 
-def _log_call(round_index: int, name: str, arguments: dict[str, Any], verbose: bool) -> None:
+def _log_call(round_index: int, name: str, arguments: dict[str, Any], verbose: bool,
+              turn_index: int = 1) -> None:
     if not verbose:
         return
     shown = ", ".join(f"{k}={v!r}" for k, v in arguments.items() if v is not None)
-    print(f"  [第 {round_index} 轮] 调用 {name}({shown})")
+    where = f"第 {round_index} 轮" if turn_index <= 1 else f"对话 {turn_index} / 第 {round_index} 轮"
+    print(f"  [{where}] 调用 {name}({shown})")
 
 
 def _add_usage(usage: dict[str, int] | None, response: Any) -> None:
@@ -122,35 +134,32 @@ def _record(trace: list[dict[str, Any]] | None, round_index: int, name: str,
 
 
 # =============================================================================
-# DeepSeek（OpenAI 兼容接口）
+# 单轮：DeepSeek（OpenAI 兼容接口）
 # =============================================================================
+# 这两个 _*_turn 函数只负责「把一条用户消息跑完」：发消息 -> 有 tool_call 就
+# 执行 -> 结果塞回去 -> 再发，直到模型不再调工具。
+#
+# 它们**就地修改传进来的 history**，而不是自己新建消息列表——多轮对话的全部
+# 状态就是这个 list，谁持有它谁就持有这段对话。Conversation 持有它。
 
-def run_deepseek(
-    question: str,
-    verbose: bool = True,
-    max_rounds: int = MAX_TOOL_ROUNDS,
-    model: str = DEEPSEEK_MODEL,
-    trace: list[dict[str, Any]] | None = None,
-    usage: dict[str, int] | None = None,
+def _deepseek_turn(
+    client: Any,
+    history: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    model: str,
+    max_rounds: int,
+    verbose: bool,
+    trace: list[dict[str, Any]] | None,
+    usage: dict[str, int] | None,
+    turn_index: int = 1,
 ) -> str:
     """手写的 agent loop。整个循环就这么点内容，值得读一遍。"""
-    from openai import OpenAI
-
-    api_key = require_api_key(
-        "DEEPSEEK_API_KEY", "密钥从 https://platform.deepseek.com 获取（只在创建时显示一次）"
-    )
-
-    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
-    tools = to_openai_tools()
-
     for round_index in range(1, max_rounds + 1):
         response = client.chat.completions.create(
             model=model,
-            messages=messages,
+            # system 不进 history：它每轮都一样，拼在请求里就行。
+            # history 里只放真正的对话内容，裁剪逻辑才不用给它开特例。
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history,
             tools=tools,
             tool_choice="auto",
         )
@@ -159,11 +168,13 @@ def run_deepseek(
 
         # 没有 tool_call 就说明模型说完了
         if not message.tool_calls:
-            return message.content or ""
+            text = message.content or ""
+            history.append({"role": "assistant", "content": text})
+            return text
 
         # 把助手这轮的回复（含 tool_calls）原样放回历史，格式必须对得上，
         # 否则下一轮请求会被拒
-        messages.append({
+        history.append({
             "role": "assistant",
             "content": message.content,
             "tool_calls": [
@@ -190,51 +201,43 @@ def run_deepseek(
                      "received": call.function.arguments},
                     ensure_ascii=False,
                 )
-                _log_call(round_index, call.function.name, {}, verbose)
+                _log_call(round_index, call.function.name, {}, verbose, turn_index)
                 _record(trace, round_index, call.function.name, {}, result)
             else:
-                _log_call(round_index, call.function.name, arguments, verbose)
+                _log_call(round_index, call.function.name, arguments, verbose, turn_index)
                 result = dispatch(call.function.name, arguments)
                 _record(trace, round_index, call.function.name, arguments, result)
 
-            messages.append({
+            history.append({
                 "role": "tool",
                 "tool_call_id": call.id,
                 "content": result,
             })
 
-    if verbose:
-        print(f"  [已达 {max_rounds} 轮上限，停止]")
-    return "（超过工具调用轮数上限，未能得出结论）"
+    return _exhausted(history, max_rounds, verbose)
 
 
 # =============================================================================
-# Anthropic
+# 单轮：Anthropic
 # =============================================================================
 
-def run_anthropic(
-    question: str,
-    verbose: bool = True,
-    max_rounds: int = MAX_TOOL_ROUNDS,
-    model: str = ANTHROPIC_MODEL,
-    trace: list[dict[str, Any]] | None = None,
-    usage: dict[str, int] | None = None,
+def _anthropic_turn(
+    client: Any,
+    history: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    model: str,
+    max_rounds: int,
+    verbose: bool,
+    trace: list[dict[str, Any]] | None,
+    usage: dict[str, int] | None,
+    turn_index: int = 1,
 ) -> str:
     """用同样的手写循环跑 Anthropic。
 
     Anthropic SDK 其实提供了 tool_runner 能自动跑完循环，这里刻意不用：
     两边用同一个结构，做模型对比评估时才不会把"框架差异"混进结论里。
+    多轮之后这个理由更强了——自动循环不会把历史交出来给我裁剪。
     """
-    from anthropic import Anthropic
-
-    require_api_key(
-        "ANTHROPIC_API_KEY", "密钥从 https://console.anthropic.com 获取"
-    )
-
-    client = Anthropic()
-    messages: list[dict[str, Any]] = [{"role": "user", "content": question}]
-    tools = to_anthropic_tools()
-
     for round_index in range(1, max_rounds + 1):
         response = client.messages.create(
             model=model,
@@ -245,19 +248,22 @@ def run_anthropic(
             # 注意不要用 budget_tokens，那个参数在 Opus 5 上会直接报 400。
             thinking={"type": "adaptive"},
             output_config={"effort": "high"},
-            messages=messages,
+            messages=history,
         )
         _add_usage(usage, response)
 
         tool_uses = [b for b in response.content if b.type == "tool_use"]
+        # 助手这轮的内容一律原样入历史。thinking 块也要留着：Anthropic 要求
+        # 带 tool_use 的那条 assistant 消息把 thinking 块连签名一起带回来。
+        history.append({"role": "assistant", "content": response.content})
+
         if not tool_uses:
             return "".join(b.text for b in response.content if b.type == "text")
 
-        messages.append({"role": "assistant", "content": response.content})
         results = []
         for block in tool_uses:
             args = dict(block.input)
-            _log_call(round_index, block.name, args, verbose)
+            _log_call(round_index, block.name, args, verbose, turn_index)
             result = dispatch(block.name, args)
             _record(trace, round_index, block.name, args, result)
             results.append({
@@ -265,11 +271,211 @@ def run_anthropic(
                 "tool_use_id": block.id,
                 "content": result,
             })
-        messages.append({"role": "user", "content": results})
+        history.append({"role": "user", "content": results})
 
+    return _exhausted(history, max_rounds, verbose)
+
+
+def _exhausted(history: list[dict[str, Any]], max_rounds: int, verbose: bool) -> str:
+    """轮数用光时收尾。
+
+    必须往历史里补一条 assistant 消息，不能就这么停在工具结果上：
+    下一轮 send() 会再追加一条 user 消息，而两条 user 消息挨在一起
+    会被 Anthropic 直接拒掉（DeepSeek 那边则是历史里悬着一堆没人回应的
+    工具结果）。补这一条既修好了格式，也让用户在 /history 里看得见断在哪。
+    """
     if verbose:
         print(f"  [已达 {max_rounds} 轮上限，停止]")
-    return "（超过工具调用轮数上限，未能得出结论）"
+    text = "（超过工具调用轮数上限，未能得出结论）"
+    history.append({"role": "assistant", "content": text})
+    return text
+
+
+# =============================================================================
+# 多轮对话
+# =============================================================================
+# 一段对话的全部状态就是一个 history 列表。这里刻意**不做跨供应商的统一
+# 消息格式**：history 里存的就是各家 API 原生的那套结构，直接发回去。
+# 中间加一层自己的格式，等于每次都要正反转换两遍，而这类转换最容易在
+# thinking 块、tool_call id 这些边角上出错——那是多轮里最难查的一类 bug。
+#
+# 统一的只有对外的接口：send / reset / usage。
+
+# 保留多少轮对话。超出就从最老的开始整轮丢弃。
+# 为什么按"轮"而不是按 token 数裁：一轮里 tool_call 和它对应的 tool 结果
+# 必须成对存在，从中间切一刀会让下一次请求直接 400。按整轮丢就不可能切坏。
+# 代价是不够精细——但"永远不会发出非法请求"比"多塞进两百个 token"重要得多。
+MAX_HISTORY_TURNS = 8
+
+
+class Conversation:
+    """一段多轮对话。
+
+    典型用法：
+
+        conv = Conversation(provider="deepseek")
+        conv.send("双非 78 分能申哪些 Monash 的 IT 硕士")
+        conv.send("第二个的雅思要求呢")     # 指代靠历史解决
+
+    client 参数是给测试用的注入口，同时也让同一段对话复用一个 HTTP 连接。
+    """
+
+    def __init__(
+        self,
+        provider: Provider | None = None,
+        model: str | None = None,
+        max_rounds: int = MAX_TOOL_ROUNDS,
+        max_history_turns: int = MAX_HISTORY_TURNS,
+        verbose: bool = True,
+        client: Any = None,
+    ) -> None:
+        provider = provider or os.environ.get("GO8_PROVIDER", "deepseek")  # type: ignore[assignment]
+        if provider not in ("deepseek", "anthropic"):
+            raise ValueError(f"未知 provider: {provider}（可选 deepseek / anthropic）")
+        self.provider: Provider = provider  # type: ignore[assignment]
+        self.model = model or (DEEPSEEK_MODEL if provider == "deepseek" else ANTHROPIC_MODEL)
+        self.max_rounds = max_rounds
+        self.max_history_turns = max_history_turns
+        self.verbose = verbose
+
+        self.history: list[dict[str, Any]] = []
+        # 每一轮用户提问在 history 里的下标。裁剪只在这些位置下刀。
+        self._turn_starts: list[int] = []
+        # 跨轮累计：整段对话花了多少钱、一共查过什么，都要能回答。
+        self.usage: dict[str, int] = {}
+        self.tool_calls: list[dict[str, Any]] = []
+        self.dropped_turns = 0
+        self._client = client
+
+    # ---- 只读视图 ----
+
+    @property
+    def turns(self) -> int:
+        """当前历史里还剩几轮（不含已被裁掉的）。"""
+        return len(self._turn_starts)
+
+    @property
+    def total_turns(self) -> int:
+        return len(self._turn_starts) + self.dropped_turns
+
+    def client(self) -> Any:
+        """按需创建供应商 client，整段对话复用同一个。"""
+        if self._client is not None:
+            return self._client
+        if self.provider == "deepseek":
+            from openai import OpenAI
+
+            api_key = require_api_key(
+                "DEEPSEEK_API_KEY",
+                "密钥从 https://platform.deepseek.com 获取（只在创建时显示一次）",
+            )
+            self._client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
+        else:
+            from anthropic import Anthropic
+
+            require_api_key("ANTHROPIC_API_KEY", "密钥从 https://console.anthropic.com 获取")
+            self._client = Anthropic()
+        return self._client
+
+    # ---- 主流程 ----
+
+    def send(
+        self,
+        question: str,
+        trace: list[dict[str, Any]] | None = None,
+        usage: dict[str, int] | None = None,
+    ) -> str:
+        """追加一轮提问，跑完 agent loop，返回回答。
+
+        trace / usage 传进来的话，只装**这一轮**的数据（评估按轮打分）；
+        整段对话的累计值一直在 self.tool_calls 和 self.usage 里。
+        """
+        self._turn_starts.append(len(self.history))
+        self.history.append({"role": "user", "content": question})
+        self._trim()
+
+        turn_index = self.total_turns
+        turn_trace: list[dict[str, Any]] = []
+        turn_usage: dict[str, int] = {}
+        runner = _deepseek_turn if self.provider == "deepseek" else _anthropic_turn
+        tools = to_openai_tools() if self.provider == "deepseek" else to_anthropic_tools()
+
+        try:
+            answer = runner(
+                self.client(), self.history, tools, self.model,
+                self.max_rounds, self.verbose, turn_trace, turn_usage, turn_index,
+            )
+        except Exception:
+            # 请求失败时把这半截历史丢掉。留着的话，history 会停在一条没人
+            # 回应的 user 消息（或一串悬空的工具结果）上，下一轮必然再失败一次——
+            # 而用户看到的是"又错了"，根本联想不到是上一次的残留。
+            self._rollback_last_turn()
+            raise
+
+        self.tool_calls.extend(turn_trace)
+        for key, value in turn_usage.items():
+            self.usage[key] = self.usage.get(key, 0) + value
+        if trace is not None:
+            trace.extend(turn_trace)
+        if usage is not None:
+            for key, value in turn_usage.items():
+                usage[key] = usage.get(key, 0) + value
+        return answer
+
+    def reset(self) -> None:
+        """清空对话历史，但**保留累计用量**。
+
+        用量是这次进程花掉的真金白银，不该因为换了个话题就归零。
+        """
+        self.history.clear()
+        self._turn_starts.clear()
+        self.dropped_turns = 0
+
+    # ---- 历史维护 ----
+
+    def _trim(self) -> None:
+        while len(self._turn_starts) > self.max_history_turns:
+            cut = self._turn_starts[1]
+            del self.history[:cut]
+            self._turn_starts = [i - cut for i in self._turn_starts[1:]]
+            self.dropped_turns += 1
+            if self.verbose:
+                print(f"  [历史超过 {self.max_history_turns} 轮，已丢弃最早一轮]")
+
+    def _rollback_last_turn(self) -> None:
+        if not self._turn_starts:
+            return
+        del self.history[self._turn_starts[-1]:]
+        self._turn_starts.pop()
+
+    def serialize(self) -> dict[str, Any]:
+        """导出成可 json.dumps 的结构（存档、/save、事后复盘用）。
+
+        Anthropic 的 assistant 内容是 SDK 对象，发回 API 没问题，但不能直接
+        序列化——只在导出这一步转成 dict，历史里仍存原对象。
+        """
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "turns": self.total_turns,
+            "dropped_turns": self.dropped_turns,
+            "usage": self.usage,
+            "tool_calls": self.tool_calls,
+            "history": [_jsonable(m) for m in self.history],
+        }
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_jsonable(v) for v in value]
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        return dump(exclude_none=True)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 # =============================================================================
@@ -287,16 +493,15 @@ def ask(
 ) -> str:
     """问一个问题，跑完 agent loop，返回最终回答。
 
+    单轮问答 = 只用一次的 Conversation。评估走的就是这条路：每道题都必须从
+    干净历史开始，否则上一题的工具结果会顺着历史漏进来，题目之间不再独立。
+
     provider 不传时读环境变量 GO8_PROVIDER，默认 deepseek。
 
     verbose=True 会打印每轮调了什么工具、传了什么参数。刚学 agent 时建议
     一直开着——你需要亲眼看到这个循环在做什么，而不是把它当黑箱。
     """
-    provider = provider or os.environ.get("GO8_PROVIDER", "deepseek")  # type: ignore[assignment]
-    if provider == "deepseek":
-        return run_deepseek(question, verbose, max_rounds,
-                            model or DEEPSEEK_MODEL, trace, usage)
-    if provider == "anthropic":
-        return run_anthropic(question, verbose, max_rounds,
-                             model or ANTHROPIC_MODEL, trace, usage)
-    raise ValueError(f"未知 provider: {provider}（可选 deepseek / anthropic）")
+    conversation = Conversation(
+        provider=provider, model=model, max_rounds=max_rounds, verbose=verbose
+    )
+    return conversation.send(question, trace=trace, usage=usage)

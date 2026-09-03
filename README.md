@@ -129,19 +129,78 @@ python -m go8agent ask "双非 78 分、雅思 6.5，跨专业能申哪些 IT �
 # 换供应商做对比（需要对应的 key）
 python -m go8agent ask "..." --provider anthropic
 
-# 8. 跑 golden set 评估（需要 API key，会产生费用）
+# 8. 多轮对话（上下文只在内存里，退出即消失）
+python -m go8agent chat
+python -m go8agent chat "Monash 有哪些 IT 硕士"      # 直接带上第一句
+python -m go8agent chat --history-turns 4            # 上下文只留最近 4 轮
+
+# 9. 跑 golden set 评估（需要 API key，会产生费用）
 python -m go8agent eval --repeat 3 --save evals/run.json
 python -m go8agent eval --only E06        # 只跑某几条
 
 # 改完评分器后离线复判存档，不重跑模型、零成本
 python -m go8agent regrade evals/run.json
 
-# 9. 重抓之后看有什么变了
+# 10. 重抓之后看有什么变了
 python -m go8agent changes
 python -m go8agent stats
 ```
 
 ---
+
+## 多轮对话
+
+`chat` 进的是一段有上下文的对话，指代（"第一个的雅思要求呢"）能落到具体项目：
+
+```
+你 > Monash 有哪些 information technology 的硕士项目
+  [第 1 轮] 调用 search_programs(keyword='information technology', ...)
+...
+你 > 第一个的雅思要求是多少
+  [对话 2 / 第 1 轮] 调用 get_program_details(program_key='monash:C6001')
+```
+
+注意第二问**仍然去查了工具**，而不是从上一轮的输出里抄一个数字。这是刻意的：
+上一轮列表里的信息可能不全（列表只给概要），照抄等于把"摘要"当"原文"。
+
+对话中可用 `/reset` `/history` `/usage` `/save <路径>` `/exit`。
+
+### 一段对话的全部状态就是一个 history 列表
+
+`Conversation` 持有它，`send()` 把它交给和单轮完全相同的那个 loop 就地追加。
+`ask()` 只是"用一次就扔的 Conversation"，两条路走同一份代码。
+
+**history 里存的是各家 API 原生的消息结构，没有自己的中间格式。** 加一层统一
+格式意味着每轮正反转换两遍，而这类转换最容易在 thinking 块签名、tool_call id
+这些边角上出错——那正是多轮里最难查的一类 bug：症状是下一轮莫名其妙 400，
+看回答完全看不出问题在哪。
+
+### 裁剪按整轮，不按 token
+
+上下文默认保留最近 8 轮，超出从最老的整轮丢弃。
+
+按 token 数裁看起来更精细，但**一轮里 tool_call 和它对应的 tool 结果必须成对
+存在**，从中间切一刀，下一次请求直接被拒。按整轮丢就不可能切坏。
+"永远不会发出非法请求"比"多塞进两百个 token"重要得多。
+
+同理，几个边界都是为了保证历史始终合法：
+
+| 情况 | 处理 | 不这么做会怎样 |
+|---|---|---|
+| 工具轮数用光 | 补一条 assistant 消息收尾 | 下一轮追加 user，出现两条挨着的 user，Anthropic 直接 400 |
+| 请求中途失败 | 回滚这半截历史 | 历史停在一条没人回应的 user 上，下一轮必然再失败一次，而用户以为是新问题 |
+| 上下文被裁 | 打印一行提示 | 用户只会看到"它怎么忘了前面说过的"，无从判断 |
+
+`/history` 会把还剩哪些消息、丢了几轮直接摊开——多轮里最贵的调试成本
+就是看不见上下文。
+
+### 单轮的 `ask()` 每次都从空历史开始
+
+这条是给评估用的：golden set 的题目之间必须独立，否则上一题的工具返回会顺着
+历史漏进下一题，而 `no_invented_numbers` 会因此把一个真的幻觉判成"有依据"。
+
+`tests/test_conversation.py` 不调模型（用脚本化的假 client），锁的正是上面
+这几条性质：成对、不连续两条 user、失败能回滚、单轮历史干净。
 
 ## 模型供应商
 
@@ -325,6 +384,7 @@ tests/
 - [ ] 中国院校分级分数线表（手工维护）
 - [x] `check_eligibility` —— 纯代码算资格，不交给模型
 - [x] Claude tool use：把查询函数暴露成 agent 工具
+- [x] 多轮对话（上下文管理 + 整轮裁剪）
 - [ ] golden set 评估（30–50 条人工标注）
 - [ ] 扩展到 ANU / UQ / Adelaide / UTS
 - [ ] USYD / UWA（需浏览器渲染）
