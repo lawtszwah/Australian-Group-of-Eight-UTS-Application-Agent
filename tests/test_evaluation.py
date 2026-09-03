@@ -259,3 +259,34 @@ class TestRegrade:
         assert results == []
         assert meta["missing_case_ids"] == ["GONE"]
         assert meta["new_case_ids"] == ["R1"]
+
+
+class TestSynonymAlternatives:
+    """must_mention 支持同义写法组。
+
+    由来：N07 要求回答里出现校区名，数据里是 "Suzhou campus"，模型答的是
+    "苏州校区"——行为完全正确却被判失败。中英混排、简称全称、同义措辞在
+    这个场景里是常态，一味往列表里加词治标不治本。
+    """
+
+    def test_single_string_still_works(self):
+        case = Case(id="t", question="q", must_mention=["C6001"])
+        assert grade(case, "项目 C6001 的要求", []).passed
+        assert not grade(case, "项目 C6004 的要求", []).passed
+
+    def test_alternatives_match_any(self):
+        case = Case(id="t", question="q", must_mention=[["Suzhou", "苏州"]])
+        assert grade(case, "在苏州校区上课", []).passed
+        assert grade(case, "at the Suzhou campus", []).passed
+        assert not grade(case, "在墨尔本上课", []).passed
+
+    def test_alternatives_work_for_must_not_mention(self):
+        case = Case(id="t", question="q", must_not_mention=[["稳过", "肯定录取"]])
+        assert not grade(case, "你肯定录取", []).passed
+        assert grade(case, "达标，但仍需以官网为准", []).passed
+
+    def test_failure_message_shows_the_alternatives(self):
+        """报错要说清楚是"这几个里任一"，否则看的人不知道怎么改。"""
+        case = Case(id="t", question="q", must_mention=[["Suzhou", "苏州"]])
+        failure = grade(case, "在墨尔本上课", []).failures[0]
+        assert "任一" in failure and "苏州" in failure

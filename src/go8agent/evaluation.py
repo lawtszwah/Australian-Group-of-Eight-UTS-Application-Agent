@@ -144,14 +144,30 @@ def grade_tool_calls(case: Case, result: CaseResult) -> list[str]:
     return [f"没有调用 {case.must_call} 里的任何工具（实际调了 {sorted(called) or '无'}）"]
 
 
+def _hits(answer: str, needle: str | list[str]) -> bool:
+    """needle 可以是一个字符串，也可以是一组同义写法（命中任一即可）。
+
+    加这层是因为 N07 漏报过：数据里写的是 "Suzhou campus"，模型答的是
+    "苏州校区"，行为完全正确却被判失败。中英混排、简称全称、同义措辞
+    在这个场景里是常态，一味往列表里加词治标不治本——把"多种写法都算对"
+    做成机制，用例才写得清楚。
+    """
+    alternatives = [needle] if isinstance(needle, str) else needle
+    return any(alt.lower() in answer.lower() for alt in alternatives)
+
+
+def _label(needle: str | list[str]) -> str:
+    return repr(needle) if isinstance(needle, str) else f"{needle}（任一）"
+
+
 def grade_mentions(case: Case, result: CaseResult) -> list[str]:
     failures = []
-    for text in case.must_mention:
-        if text.lower() not in result.answer.lower():
-            failures.append(f"回答里没有出现 {text!r}")
-    for text in case.must_not_mention:
-        if text.lower() in result.answer.lower():
-            failures.append(f"回答里出现了不该有的 {text!r}")
+    for needle in case.must_mention:
+        if not _hits(result.answer, needle):
+            failures.append(f"回答里没有出现 {_label(needle)}")
+    for needle in case.must_not_mention:
+        if _hits(result.answer, needle):
+            failures.append(f"回答里出现了不该有的 {_label(needle)}")
     if case.must_say_any and not any(
         t.lower() in result.answer.lower() for t in case.must_say_any
     ):
