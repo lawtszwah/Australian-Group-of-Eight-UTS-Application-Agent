@@ -112,5 +112,61 @@ class TestSummary:
                               failures=["回答里出现了工具返回中不存在的数字: ['88']"]),
                    CaseResult(case=cases[2], answer="", trace=[], error="boom")]
         s = summarize(results)
-        assert (s["total"], s["passed"], s["errored"]) == (3, 1, 1)
+        assert (s["runs"], s["passed"], s["errored"]) == (3, 1, 1)
         assert s["failures_by_kind"]["编造数字"] == 1
+
+
+class TestStability:
+    """三种结局要采取的行动完全不同，必须分开统计。"""
+
+    @staticmethod
+    def _runs(case_id: str, outcomes: list[bool]):
+        case = Case(id=case_id, question="q")
+        return [
+            CaseResult(case=case, answer="", trace=[], attempt=i,
+                       failures=[] if ok else ["某项不符"])
+            for i, ok in enumerate(outcomes, 1)
+        ]
+
+    def test_classifies_three_outcomes(self):
+        results = (self._runs("always", [True, True, True])
+                   + self._runs("sometimes", [True, False, True])
+                   + self._runs("never", [False, False, False]))
+        s = summarize(results)
+        assert (s["cases"], s["repeat"], s["runs"]) == (3, 3, 9)
+        assert s["stable_pass"] == 1
+        assert s["flaky_ids"] == ["sometimes"]
+        assert s["stable_fail_ids"] == ["never"]
+
+    def test_flaky_case_is_not_counted_as_passing(self):
+        """时对时错必须单独标出。单次评估会随机把它报成通过，
+        给出虚假的安全感——这正是重复跑要解决的问题。"""
+        s = summarize(self._runs("sometimes", [True, False]))
+        assert s["stable_pass"] == 0
+        assert s["flaky"] == 1
+
+
+class TestCostEstimate:
+    def test_known_model_is_priced(self):
+        from go8agent.evaluation import estimate_cost
+
+        cost = estimate_cost("deepseek-v4-flash",
+                             {"input_tokens": 1_000_000, "output_tokens": 1_000_000})
+        assert cost == pytest.approx(0.44 + 1.32)
+
+    def test_cache_hits_are_priced_separately(self):
+        """缓存命中的输入便宜一个数量级，混在一起算会高估很多。"""
+        from go8agent.evaluation import estimate_cost
+
+        cheap = estimate_cost("deepseek-v4-flash",
+                              {"input_tokens": 1_000_000,
+                               "cached_input_tokens": 1_000_000,
+                               "uncached_input_tokens": 0,
+                               "output_tokens": 0})
+        assert cheap == pytest.approx(0.014)
+
+    def test_unknown_model_returns_none_not_a_wrong_number(self):
+        """宁可不显示成本，也不显示一个错的。"""
+        from go8agent.evaluation import estimate_cost
+
+        assert estimate_cost("some-new-model", {"input_tokens": 1_000_000}) is None

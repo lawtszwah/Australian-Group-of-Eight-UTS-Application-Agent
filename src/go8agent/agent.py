@@ -86,6 +86,28 @@ def _log_call(round_index: int, name: str, arguments: dict[str, Any], verbose: b
     print(f"  [第 {round_index} 轮] 调用 {name}({shown})")
 
 
+def _add_usage(usage: dict[str, int] | None, response: Any) -> None:
+    """累加一次请求的 token 用量。
+
+    评估会把同一批题跑很多遍，不记账很容易在不知不觉中花掉不少钱。
+    DeepSeek 还会返回缓存命中/未命中的拆分，命中部分便宜一个数量级，
+    分开记才能看出缓存到底有没有起作用。
+    """
+    if usage is None or getattr(response, "usage", None) is None:
+        return
+    u = response.usage
+    usage["requests"] = usage.get("requests", 0) + 1
+    for field, key in [
+        ("prompt_tokens", "input_tokens"),
+        ("completion_tokens", "output_tokens"),
+        ("prompt_cache_hit_tokens", "cached_input_tokens"),
+        ("prompt_cache_miss_tokens", "uncached_input_tokens"),
+    ]:
+        value = getattr(u, field, None)
+        if isinstance(value, int):
+            usage[key] = usage.get(key, 0) + value
+
+
 def _record(trace: list[dict[str, Any]] | None, round_index: int, name: str,
             arguments: dict[str, Any], result: str) -> None:
     """记录一次工具调用，供评估打分用。
@@ -109,6 +131,7 @@ def run_deepseek(
     max_rounds: int = MAX_TOOL_ROUNDS,
     model: str = DEEPSEEK_MODEL,
     trace: list[dict[str, Any]] | None = None,
+    usage: dict[str, int] | None = None,
 ) -> str:
     """手写的 agent loop。整个循环就这么点内容，值得读一遍。"""
     from openai import OpenAI
@@ -131,6 +154,7 @@ def run_deepseek(
             tools=tools,
             tool_choice="auto",
         )
+        _add_usage(usage, response)
         message = response.choices[0].message
 
         # 没有 tool_call 就说明模型说完了
@@ -194,6 +218,7 @@ def run_anthropic(
     max_rounds: int = MAX_TOOL_ROUNDS,
     model: str = ANTHROPIC_MODEL,
     trace: list[dict[str, Any]] | None = None,
+    usage: dict[str, int] | None = None,
 ) -> str:
     """用同样的手写循环跑 Anthropic。
 
@@ -222,6 +247,7 @@ def run_anthropic(
             output_config={"effort": "high"},
             messages=messages,
         )
+        _add_usage(usage, response)
 
         tool_uses = [b for b in response.content if b.type == "tool_use"]
         if not tool_uses:
@@ -257,6 +283,7 @@ def ask(
     max_rounds: int = MAX_TOOL_ROUNDS,
     model: str | None = None,
     trace: list[dict[str, Any]] | None = None,
+    usage: dict[str, int] | None = None,
 ) -> str:
     """问一个问题，跑完 agent loop，返回最终回答。
 
@@ -267,7 +294,9 @@ def ask(
     """
     provider = provider or os.environ.get("GO8_PROVIDER", "deepseek")  # type: ignore[assignment]
     if provider == "deepseek":
-        return run_deepseek(question, verbose, max_rounds, model or DEEPSEEK_MODEL, trace)
+        return run_deepseek(question, verbose, max_rounds,
+                            model or DEEPSEEK_MODEL, trace, usage)
     if provider == "anthropic":
-        return run_anthropic(question, verbose, max_rounds, model or ANTHROPIC_MODEL, trace)
+        return run_anthropic(question, verbose, max_rounds,
+                             model or ANTHROPIC_MODEL, trace, usage)
     raise ValueError(f"未知 provider: {provider}（可选 deepseek / anthropic）")

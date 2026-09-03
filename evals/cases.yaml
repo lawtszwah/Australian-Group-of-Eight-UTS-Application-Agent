@@ -12,6 +12,14 @@
 #   must_mention      回答里必须出现的字符串
 #   must_not_mention  回答里不许出现的字符串
 #   must_say_any      必须命中其中至少一个说法（用于"该说不知道"的场景）
+#
+#                     注意：关键词匹配天生脆弱——同一个意思模型有几十种说法。
+#                     E06 就漏报过一次：判定词里有"没有登载"，模型写的是
+#                     "没有这一项"；有"需到"，模型写的是"去…核实"。行为完全
+#                     正确却被判失败。
+#                     所以这个列表要写得宽，**而且能用 must_not_mention 或
+#                     no_invented_numbers 表达的性质，优先用那两个**——
+#                     "不许出现某个数字"是客观的，"必须说某句话"是主观的。
 #   must_cite         必须附来源 URL
 #   no_invented_numbers  回答里的百分数和 x.x 小数必须都能在工具返回里找到
 #
@@ -63,7 +71,8 @@
   # UNSW handbook 整个不登载语言要求。必须说"查不到"，不能编一个 6.5。
   question: UNSW 的 Master of Construction Project Management (8121) 雅思要求是多少
   must_call: [get_program_details]
-  must_say_any: ["未登载", "查不到", "没有登载", "handbook 上没有", "需到", "international"]
+  must_say_any: ["未登载", "没有登载", "没有这一项", "数据里没有", "字段为空",
+                 "查不到", "未收录", "核实"]
   must_not_mention: ["雅思 6.5", "IELTS 6.5", "雅思要求为 6.5"]
   no_invented_numbers: true
 

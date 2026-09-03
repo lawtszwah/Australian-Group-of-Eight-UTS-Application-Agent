@@ -56,6 +56,34 @@ DECIMAL_RE = re.compile(r"\b(\d\.\d)\b")
 QUOTED_RE = re.compile(r"[\"\u201c\u201d\u300c\u300d\u2018\u2019'][^\"\u201c\u201d\u300c\u300d\u2018\u2019'\n]{0,80}?[\"\u201c\u201d\u300c\u300d\u2018\u2019']")
 
 
+# 每百万 token 的美元单价，取**峰时价**（保守估计，实际可能更低）。
+# DeepSeek 的非峰时价是峰时的一半；缓存命中的输入便宜一个数量级。
+# 价格核实于 2026-09，会变——这里只用于给出量级感，不是账单。
+PRICING: dict[str, dict[str, float]] = {
+    "deepseek-v4-flash": {"input": 0.44, "cached_input": 0.014, "output": 1.32},
+    "deepseek-v4-pro": {"input": 1.32, "cached_input": 0.044, "output": 3.96},
+    "claude-opus-5": {"input": 5.0, "output": 25.0},
+    "claude-sonnet-5": {"input": 2.0, "output": 10.0},
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
+}
+
+
+def estimate_cost(model: str, usage: dict[str, int]) -> float | None:
+    """估算美元成本。未知模型返回 None——宁可不显示，也不显示一个错的数。"""
+    price = PRICING.get(model)
+    if not price:
+        return None
+    cached = usage.get("cached_input_tokens", 0)
+    # 有缓存拆分就分开算，没有就全按未缓存价（保守）
+    uncached = usage.get("uncached_input_tokens",
+                         usage.get("input_tokens", 0) - cached)
+    return (
+        uncached / 1e6 * price["input"]
+        + cached / 1e6 * price.get("cached_input", price["input"])
+        + usage.get("output_tokens", 0) / 1e6 * price["output"]
+    )
+
+
 @dataclass
 class Case:
     id: str
@@ -76,6 +104,8 @@ class CaseResult:
     trace: list[dict[str, Any]]
     failures: list[str] = field(default_factory=list)
     error: str | None = None
+    usage: dict[str, int] = field(default_factory=dict)
+    attempt: int = 1
 
     @property
     def passed(self) -> bool:
@@ -175,21 +205,70 @@ def grade(case: Case, answer: str, trace: list[dict[str, Any]]) -> CaseResult:
 # 跑一整轮
 # =============================================================================
 
-def run_case(case: Case, provider: str | None, model: str | None) -> CaseResult:
+def run_case(case: Case, provider: str | None, model: str | None,
+             attempt: int = 1) -> CaseResult:
     from .agent import ask
 
     trace: list[dict[str, Any]] = []
+    usage: dict[str, int] = {}
     try:
         answer = ask(case.question, provider=provider, verbose=False,
-                     model=model, trace=trace)
+                     model=model, trace=trace, usage=usage)
     except Exception as exc:
-        result = CaseResult(case=case, answer="", trace=trace)
+        result = CaseResult(case=case, answer="", trace=trace, usage=usage,
+                            attempt=attempt)
         result.error = f"{type(exc).__name__}: {exc}"
         return result
-    return grade(case, answer, trace)
+    result = grade(case, answer, trace)
+    result.usage = usage
+    result.attempt = attempt
+    return result
 
 
-def summarize(results: list[CaseResult]) -> dict[str, Any]:
+@dataclass
+class CaseStability:
+    """同一条题跑 N 次的汇总。
+
+    分三类，因为它们要采取的行动完全不同：
+      稳定通过    不用管
+      稳定失败    确定性问题，改 prompt 或改工具能修
+      **不稳定**  同样输入时对时错。这类最该优先看，因为它意味着系统在
+                  这个场景下本质上不可靠，而单次评估会随机地把它报成
+                  "通过"，给你一个虚假的安全感。
+    """
+
+    case_id: str
+    runs: list[CaseResult]
+
+    @property
+    def passes(self) -> int:
+        return sum(r.passed for r in self.runs)
+
+    @property
+    def total(self) -> int:
+        return len(self.runs)
+
+    @property
+    def verdict(self) -> str:
+        if self.passes == self.total:
+            return "stable_pass"
+        if self.passes == 0:
+            return "stable_fail"
+        return "flaky"
+
+    @property
+    def avg_tool_calls(self) -> float:
+        return round(sum(len(r.trace) for r in self.runs) / self.total, 1)
+
+
+def group_by_case(results: list[CaseResult]) -> list[CaseStability]:
+    grouped: dict[str, list[CaseResult]] = {}
+    for r in results:
+        grouped.setdefault(r.case.id, []).append(r)
+    return [CaseStability(case_id=k, runs=v) for k, v in grouped.items()]
+
+
+def summarize(results: list[CaseResult], model: str | None = None) -> dict[str, Any]:
     total = len(results)
     passed = sum(r.passed for r in results)
     errored = sum(r.error is not None for r in results)
@@ -202,32 +281,79 @@ def summarize(results: list[CaseResult]) -> dict[str, Any]:
                     else "缺来源" if "来源 URL" in f
                     else "说法不符")
             by_kind[kind] = by_kind.get(kind, 0) + 1
+    stability = group_by_case(results)
+    by_verdict: dict[str, list[str]] = {"stable_pass": [], "flaky": [], "stable_fail": []}
+    for st in stability:
+        by_verdict[st.verdict].append(st.case_id)
+
+    combined: dict[str, int] = {}
+    for r in results:
+        for k, v in r.usage.items():
+            combined[k] = combined.get(k, 0) + v
+    cost = estimate_cost(model, combined) if model else None
+
     return {
-        "total": total,
+        "runs": total,
+        "cases": len(stability),
+        "repeat": round(total / len(stability)) if stability else 0,
         "passed": passed,
         "failed": total - passed,
         "errored": errored,
         "pass_rate": round(passed / total, 3) if total else 0.0,
+        "stable_pass": len(by_verdict["stable_pass"]),
+        "flaky": len(by_verdict["flaky"]),
+        "stable_fail": len(by_verdict["stable_fail"]),
+        "flaky_ids": by_verdict["flaky"],
+        "stable_fail_ids": by_verdict["stable_fail"],
         "failures_by_kind": dict(sorted(by_kind.items(), key=lambda x: -x[1])),
         "avg_tool_calls": round(sum(len(r.trace) for r in results) / total, 1) if total else 0,
+        "usage": combined,
+        "estimated_cost_usd": round(cost, 4) if cost is not None else None,
     }
 
 
+MARK = {"stable_pass": "  ", "flaky": "≈ ", "stable_fail": "✗ "}
+
+
 def format_report(results: list[CaseResult], summary: dict[str, Any]) -> str:
-    lines = ["", "=" * 68]
-    for r in results:
-        mark = "PASS" if r.passed else ("ERR " if r.error else "FAIL")
-        lines.append(f"[{mark}] {r.case.id}  (工具 {len(r.trace)} 次: "
-                     f"{', '.join(dict.fromkeys(r.tools_called)) or '无'})")
-        if r.error:
-            lines.append(f"        异常: {r.error}")
-        for f in r.failures:
-            lines.append(f"        - {f}")
-    lines += ["=" * 68,
-              f"通过 {summary['passed']}/{summary['total']}"
-              f"  通过率 {summary['pass_rate']:.0%}"
-              f"  平均工具调用 {summary['avg_tool_calls']} 次"]
+    lines = ["", "=" * 72]
+    for st in group_by_case(results):
+        lines.append(f"{MARK[st.verdict]}[{st.passes}/{st.total}] {st.case_id}"
+                     f"   (平均工具 {st.avg_tool_calls} 次)")
+        for r in st.runs:
+            if r.error:
+                lines.append(f"        第{r.attempt}次 异常: {r.error}")
+            for f in r.failures:
+                lines.append(f"        第{r.attempt}次 - {f}")
+    lines.append("=" * 72)
+    lines.append(
+        f"{summary['cases']} 条题 x {summary['repeat']} 次 = {summary['runs']} 次运行"
+        f"   通过率 {summary['pass_rate']:.0%}"
+    )
+    lines.append(
+        f"稳定通过 {summary['stable_pass']}"
+        f"   不稳定 {summary['flaky']}"
+        f"   稳定失败 {summary['stable_fail']}"
+        f"   平均工具调用 {summary['avg_tool_calls']} 次"
+    )
+    if summary["flaky_ids"]:
+        lines.append("不稳定（最该优先处理）: " + ", ".join(summary["flaky_ids"]))
+    if summary["stable_fail_ids"]:
+        lines.append("稳定失败: " + ", ".join(summary["stable_fail_ids"]))
     if summary["failures_by_kind"]:
         lines.append("失败归类: " + "  ".join(
             f"{k} {v}" for k, v in summary["failures_by_kind"].items()))
+
+    u = summary.get("usage") or {}
+    if u:
+        parts = [f"请求 {u.get('requests', 0)} 次",
+                 f"输入 {u.get('input_tokens', 0):,}",
+                 f"输出 {u.get('output_tokens', 0):,}"]
+        if u.get("cached_input_tokens"):
+            parts.append(f"其中缓存命中 {u['cached_input_tokens']:,}")
+        lines.append("token: " + "  ".join(parts))
+    if summary.get("estimated_cost_usd") is not None:
+        per_run = summary["estimated_cost_usd"] / max(summary["runs"], 1)
+        lines.append(f"估算成本: ${summary['estimated_cost_usd']:.4f}"
+                     f"（每次运行约 ${per_run:.4f}，按峰时价，实际可能更低）")
     return "\n".join(lines)

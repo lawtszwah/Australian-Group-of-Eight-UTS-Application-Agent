@@ -12,9 +12,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
+from .agent import ANTHROPIC_MODEL, DEEPSEEK_MODEL
 from .db import Database
 from .eligibility import StudentProfile, check_eligibility, format_result
 from .fetch import SITEMAPS, Fetcher
@@ -350,32 +352,47 @@ def cmd_eval(args: argparse.Namespace) -> int:
             print(f"没有匹配 {args.only} 的用例", file=sys.stderr)
             return 1
 
-    print(f"跑 {len(cases)} 条用例，provider={args.provider or '默认'} "
-          f"model={args.model or '默认'}\n")
-    results = []
-    for index, case in enumerate(cases, 1):
-        print(f"  ({index}/{len(cases)}) {case.id} ...", end="", flush=True)
-        result = run_case(case, args.provider, args.model)
-        results.append(result)
-        print(" PASS" if result.passed else (" ERROR" if result.error else " FAIL"))
+    # 默认模型名要写进结果里，否则成本估算不知道按哪个价算
+    model = args.model or (
+        ANTHROPIC_MODEL if args.provider == "anthropic"
+        else os.environ.get("GO8_PROVIDER") == "anthropic" and ANTHROPIC_MODEL
+        or DEEPSEEK_MODEL
+    )
 
-    summary = summarize(results)
+    print(f"跑 {len(cases)} 条用例 x {args.repeat} 次 = "
+          f"{len(cases) * args.repeat} 次运行，model={model}\n")
+
+    results = []
+    for attempt in range(1, args.repeat + 1):
+        if args.repeat > 1:
+            print(f"  --- 第 {attempt}/{args.repeat} 轮 ---")
+        for index, case in enumerate(cases, 1):
+            print(f"  ({index}/{len(cases)}) {case.id} ...", end="", flush=True)
+            result = run_case(case, args.provider, args.model, attempt)
+            results.append(result)
+            print(" PASS" if result.passed
+                  else (" ERROR" if result.error else " FAIL"))
+
+    summary = summarize(results, model=model)
     print(format_report(results, summary))
 
     if args.save:
         path = Path(args.save)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
-            "provider": args.provider, "model": args.model,
+            "provider": args.provider, "model": model, "repeat": args.repeat,
             "summary": summary,
             "results": [
-                {"id": r.case.id, "passed": r.passed, "error": r.error,
-                 "failures": r.failures, "tools": r.tools_called, "answer": r.answer}
+                {"id": r.case.id, "attempt": r.attempt, "passed": r.passed,
+                 "error": r.error, "failures": r.failures,
+                 "tools": r.tools_called, "usage": r.usage, "answer": r.answer}
                 for r in results
             ],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\n详细结果 -> {path}")
-    return 0
+
+    # 不稳定的用例也算问题——单次评估会随机把它报成通过
+    return 0 if summary["flaky"] == 0 and summary["stable_fail"] == 0 else 1
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
@@ -450,6 +467,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provider", choices=["deepseek", "anthropic"], default=None)
     p.add_argument("--model", default=None, help="覆盖默认模型名")
     p.add_argument("--only", default=None, help="只跑匹配的用例，逗号分隔，如 'E05,E06'")
+    p.add_argument("--repeat", type=int, default=1,
+                   help="每条题重复跑几次，默认 1。模型有随机性，单次结果噪声大——"
+                        "判断改动是否有效应至少跑 3 次")
     p.add_argument("--save", default=None, help="把详细结果存成 JSON，如 evals/run.json")
     p.set_defaults(func=cmd_eval)
 
