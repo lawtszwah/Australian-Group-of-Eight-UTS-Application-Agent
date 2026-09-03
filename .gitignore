@@ -6,6 +6,10 @@ export/
 *.db
 *.log
 
+# 评估的运行产物：含完整 trace，MB 量级，且可重新跑出来。
+# evals/cases.yaml 才是源，它要进版本库。
+evals/*.json
+
 # Python
 __pycache__/
 *.py[cod]

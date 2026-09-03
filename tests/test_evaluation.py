@@ -170,3 +170,92 @@ class TestCostEstimate:
         from go8agent.evaluation import estimate_cost
 
         assert estimate_cost("some-new-model", {"input_tokens": 1_000_000}) is None
+
+
+class TestRegrade:
+    """复判存档。评分器已经改过两次，每次都重跑模型既慢又花钱。"""
+
+    @staticmethod
+    def _archive(tmp_path, results, model="deepseek-v4-flash"):
+        import json
+        p = tmp_path / "run.json"
+        p.write_text(json.dumps({
+            "model": model, "repeat": 1,
+            "summary": {"pass_rate": 0.0},
+            "results": results,
+        }, ensure_ascii=False), encoding="utf-8")
+        return p
+
+    def test_regrades_with_current_cases(self, tmp_path):
+        from go8agent.evaluation import load_run
+
+        case = Case(id="R1", question="要求多少", must_say_any=["未登载"])
+        archive = self._archive(tmp_path, [{
+            "id": "R1", "attempt": 1, "passed": False, "answer": "官网未登载",
+            "trace": [{"round": 1, "tool": "get_program_details",
+                       "args": {}, "result": "{}"}],
+        }])
+        results, meta = load_run(archive, cases=[case])
+        assert len(results) == 1 and results[0].passed
+        assert meta["traces_saved"] is True
+
+    def test_flip_is_reported(self, tmp_path):
+        """由失败转通过多半是评分器修复；反向则要警惕。"""
+        from go8agent.evaluation import diff_verdicts, load_run
+
+        case = Case(id="R1", question="q", must_say_any=["未登载"])
+        archive = self._archive(tmp_path, [{
+            "id": "R1", "attempt": 1, "passed": False,
+            "answer": "官网未登载", "trace": [],
+        }])
+        results, meta = load_run(archive, cases=[case])
+        flipped = diff_verdicts(results, meta)
+        assert flipped["fail_to_pass"] == ["R1 第1次"]
+        assert flipped["pass_to_fail"] == []
+
+    def test_missing_traces_skip_number_check_instead_of_failing(self, tmp_path):
+        """老存档没存工具返回内容，数字判定无从比对。
+
+        既不能判通过（等于放行所有幻觉），也不能判失败（会凭空造出一堆
+        假问题——实测这样判会让通过率从 98% 掉到 49%，全是假的）。
+        唯一诚实的做法是记为"未判定"。
+        """
+        from go8agent.evaluation import load_run, summarize
+
+        case = Case(id="R1", question="q", no_invented_numbers=True)
+        archive = self._archive(tmp_path, [{
+            "id": "R1", "attempt": 1, "passed": True,
+            "answer": "要求均分 88%",     # 88 在任何地方都找不到
+            "tools": ["get_program_details"],   # 老格式：只有工具名
+        }])
+        results, meta = load_run(archive, cases=[case])
+        assert meta["traces_saved"] is False
+        assert results[0].passed          # 没有被误判成失败
+        assert results[0].skipped == ["no_invented_numbers"]
+        assert summarize(results)["skipped_checks"] == 1
+
+    def test_full_trace_still_catches_invented_numbers(self, tmp_path):
+        """有 trace 时该抓的还是要抓到——跳过逻辑不能把真问题也放走。"""
+        from go8agent.evaluation import load_run
+
+        case = Case(id="R1", question="q", no_invented_numbers=True)
+        archive = self._archive(tmp_path, [{
+            "id": "R1", "attempt": 1, "passed": True, "answer": "要求均分 88%",
+            "trace": [{"round": 1, "tool": "get_program_details", "args": {},
+                       "result": '{"min_wam_percent": 65}'}],
+        }])
+        results, _ = load_run(archive, cases=[case])
+        assert not results[0].passed
+        assert results[0].skipped == []
+
+    def test_cases_removed_from_yaml_are_skipped_not_crashed(self, tmp_path):
+        """存档天然会比代码旧，用例被删不该让复判崩掉。"""
+        from go8agent.evaluation import load_run
+
+        archive = self._archive(tmp_path, [{
+            "id": "GONE", "attempt": 1, "passed": True, "answer": "x", "trace": [],
+        }])
+        results, meta = load_run(archive, cases=[Case(id="R1", question="q")])
+        assert results == []
+        assert meta["missing_case_ids"] == ["GONE"]
+        assert meta["new_case_ids"] == ["R1"]

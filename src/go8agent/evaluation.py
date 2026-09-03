@@ -106,6 +106,10 @@ class CaseResult:
     error: str | None = None
     usage: dict[str, int] = field(default_factory=dict)
     attempt: int = 1
+    # 因为缺少必要材料而没能执行的评分器。
+    # 关键：**跳过不等于通过**。缺材料时判"通过"会给出虚假的安全感，
+    # 判"失败"又会凭空造出一堆假问题——只能如实记为"未判定"。
+    skipped: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -177,9 +181,17 @@ def grade_no_invented_numbers(case: Case, result: CaseResult) -> list[str]:
     if not case.no_invented_numbers:
         return []
 
+    # 没有工具返回内容就无从比对。这种情况只可能出现在复判老格式存档时。
+    # 此时既不能判通过（等于放行所有幻觉），也不能判失败（会凭空造出
+    # 一堆假问题——实测老存档这样判会让通过率从 98% 掉到 49%，全是假的）。
+    # 唯一诚实的做法是记为"未判定"。
+    if result.trace and not any(step.get("result") for step in result.trace):
+        result.skipped.append("no_invented_numbers")
+        return []
+
     # 允许的来源：工具返回的全部内容 + 用户问题本身（用户说"我 78 分"，
     # 模型复述 78 不算编造）
-    grounded = case.question + " ".join(step["result"] for step in result.trace)
+    grounded = case.question + " ".join(step.get("result", "") for step in result.trace)
     grounded_numbers = _numbers_in(grounded)
     # 工具返回是 JSON，数字可能写成 78.0 / 6.5 等形式，统一比对时也看原始文本
     invented = sorted(
@@ -261,6 +273,73 @@ class CaseStability:
         return round(sum(len(r.trace) for r in self.runs) / self.total, 1)
 
 
+def load_run(path: Path, cases: list[Case] | None = None) -> tuple[list[CaseResult], dict]:
+    """从存档里还原一次运行，用**当前**的用例定义和评分器重新判定。
+
+    这是 regrade 的核心。评分器改了两次都是靠这条路验证的：
+    存档里有完整的回答和工具返回，所以复判完全离线、零成本。
+    否则每次调一个判定词都要重跑一遍模型，既慢又花钱。
+
+    返回 (重新判定后的结果, 存档元信息)。元信息里带着每次运行原来的
+    passed，用于算出「这次改动让多少条翻转了」。
+    """
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    by_id = {c.id: c for c in (cases if cases is not None else load_cases())}
+
+    results: list[CaseResult] = []
+    previous: dict[tuple[str, int], bool] = {}
+    missing: set[str] = set()
+
+    for row in payload.get("results", []):
+        case = by_id.get(row["id"])
+        if case is None:
+            # 用例被删或改名了。跳过而不是报错——存档本来就会比代码旧。
+            missing.add(row["id"])
+            continue
+        trace = row.get("trace")
+        if trace is None:
+            # 老格式只存了工具名，没存返回内容。数字判定需要返回内容，
+            # 这里退化成空 result，判定会偏松——必须让调用方知道。
+            trace = [{"round": 0, "tool": t, "args": {}, "result": ""}
+                     for t in row.get("tools", [])]
+        result = grade(case, row.get("answer", ""), trace)
+        result.attempt = row.get("attempt", 1)
+        result.usage = row.get("usage", {})
+        if row.get("error"):
+            result.error = row["error"]
+        results.append(result)
+        previous[(case.id, result.attempt)] = bool(row.get("passed"))
+
+    meta = {
+        "model": payload.get("model"),
+        "provider": payload.get("provider"),
+        "repeat": payload.get("repeat", 1),
+        "saved_summary": payload.get("summary", {}),
+        "previous": previous,
+        "missing_case_ids": sorted(missing),
+        "traces_saved": any(r.get("trace") for r in payload.get("results", [])),
+        "new_case_ids": sorted(set(by_id) - {r["id"] for r in payload.get("results", [])}),
+    }
+    return results, meta
+
+
+def diff_verdicts(results: list[CaseResult], meta: dict) -> dict[str, list[str]]:
+    """算出复判相对存档的翻转情况。
+
+    「由失败转通过」多半是评分器修复；「由通过转失败」要警惕——
+    可能是新加的判定条件太严，也可能是真的抓到了此前漏掉的问题。
+    """
+    previous = meta.get("previous", {})
+    flipped: dict[str, list[str]] = {"fail_to_pass": [], "pass_to_fail": []}
+    for r in results:
+        was = previous.get((r.case.id, r.attempt))
+        if was is None or was == r.passed:
+            continue
+        key = "fail_to_pass" if r.passed else "pass_to_fail"
+        flipped[key].append(f"{r.case.id} 第{r.attempt}次")
+    return flipped
+
+
 def group_by_case(results: list[CaseResult]) -> list[CaseStability]:
     grouped: dict[str, list[CaseResult]] = {}
     for r in results:
@@ -309,6 +388,9 @@ def summarize(results: list[CaseResult], model: str | None = None) -> dict[str, 
         "avg_tool_calls": round(sum(len(r.trace) for r in results) / total, 1) if total else 0,
         "usage": combined,
         "estimated_cost_usd": round(cost, 4) if cost is not None else None,
+        # 未判定的项数。这个数不为 0 时，通过率是不完整的，必须一起显示，
+        # 否则读的人会把"没查"当成"没问题"。
+        "skipped_checks": sum(len(r.skipped) for r in results),
     }
 
 
@@ -329,6 +411,8 @@ def format_report(results: list[CaseResult], summary: dict[str, Any]) -> str:
     lines.append(
         f"{summary['cases']} 条题 x {summary['repeat']} 次 = {summary['runs']} 次运行"
         f"   通过率 {summary['pass_rate']:.0%}"
+        + (f"（不完整：{summary['skipped_checks']} 项未判定）"
+           if summary.get("skipped_checks") else "")
     )
     lines.append(
         f"稳定通过 {summary['stable_pass']}"

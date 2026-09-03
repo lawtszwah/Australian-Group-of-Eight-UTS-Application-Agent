@@ -385,13 +385,72 @@ def cmd_eval(args: argparse.Namespace) -> int:
             "results": [
                 {"id": r.case.id, "attempt": r.attempt, "passed": r.passed,
                  "error": r.error, "failures": r.failures,
-                 "tools": r.tools_called, "usage": r.usage, "answer": r.answer}
+                 "tools": r.tools_called, "usage": r.usage, "answer": r.answer,
+                 # 存完整 trace，这样改了评分器可以用 regrade 离线复判，
+                 # 不必重新跑模型。文件会大到 MB 量级，已在 gitignore 里。
+                 "trace": r.trace}
                 for r in results
             ],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"\n详细结果 -> {path}")
+        size_kb = path.stat().st_size / 1024
+        print(f"\n详细结果 -> {path}（{size_kb:.0f} KB，含完整 trace，可用 regrade 复判）")
 
     # 不稳定的用例也算问题——单次评估会随机把它报成通过
+    return 0 if summary["flaky"] == 0 and summary["stable_fail"] == 0 else 1
+
+
+def cmd_regrade(args: argparse.Namespace) -> int:
+    """用当前的用例定义和评分器，重新判定一次存档的运行结果。
+
+    完全离线、零成本。评分器已经改过两次（一次误报、一次漏报），
+    每次都重跑模型既慢又花钱——存档里有完整回答和工具返回，直接复判即可。
+    """
+    from .evaluation import diff_verdicts, format_report, load_run, summarize
+
+    path = Path(args.run_file)
+    if not path.exists():
+        print(f"找不到存档 {path}", file=sys.stderr)
+        return 1
+
+    results, meta = load_run(path)
+    if not results:
+        print("存档里没有可复判的结果", file=sys.stderr)
+        return 1
+
+    print(f"复判存档 {path}（model={meta['model']}，{len(results)} 次运行）")
+    if not meta["traces_saved"]:
+        print("  ⚠️  该存档没有 trace，数字判定会偏松——重跑一次即可生成新格式",
+              file=sys.stderr)
+    if meta["missing_case_ids"]:
+        print(f"  ⚠️  存档里这些用例已不在 cases.yaml，已跳过: {meta['missing_case_ids']}")
+    if meta["new_case_ids"]:
+        print(f"  ⚠️  cases.yaml 里这些用例存档中没有，未参与复判: {meta['new_case_ids']}")
+
+    summary = summarize(results, model=meta["model"])
+    print(format_report(results, summary))
+
+    flipped = diff_verdicts(results, meta)
+    old_rate = meta["saved_summary"].get("pass_rate")
+    print()
+    if old_rate is not None:
+        print(f"对比存档: 通过率 {old_rate:.0%} -> {summary['pass_rate']:.0%}")
+    if flipped["fail_to_pass"]:
+        print(f"  由失败转通过 {len(flipped['fail_to_pass'])}（多半是评分器修复）: "
+              + ", ".join(flipped["fail_to_pass"]))
+    if flipped["pass_to_fail"]:
+        print(f"  由通过转失败 {len(flipped['pass_to_fail'])}（要确认是判定变严还是"
+              f"抓到了真问题）: " + ", ".join(flipped["pass_to_fail"]))
+    if not flipped["fail_to_pass"] and not flipped["pass_to_fail"]:
+        print("  判定结果与存档一致，没有翻转")
+
+    if args.save:
+        out = Path(args.save)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({
+            "regraded_from": str(path), "model": meta["model"],
+            "summary": summary, "flipped": flipped,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n复判摘要 -> {out}")
     return 0 if summary["flaky"] == 0 and summary["stable_fail"] == 0 else 1
 
 
@@ -472,6 +531,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "判断改动是否有效应至少跑 3 次")
     p.add_argument("--save", default=None, help="把详细结果存成 JSON，如 evals/run.json")
     p.set_defaults(func=cmd_eval)
+
+    p = sub.add_parser("regrade",
+                       help="用当前评分器复判一次存档的评估结果（离线，零成本）")
+    p.add_argument("run_file", help="评估存档，如 evals/stability_flash.json")
+    p.add_argument("--save", default=None, help="把复判摘要另存为 JSON")
+    p.set_defaults(func=cmd_regrade)
 
     p = sub.add_parser("prune", help="清除不在当前 handbook 年份里的项目（已停办）")
     p.add_argument("university", choices=sorted(SITEMAPS))

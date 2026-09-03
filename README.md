@@ -133,6 +133,9 @@ python -m go8agent ask "..." --provider anthropic
 python -m go8agent eval --repeat 3 --save evals/run.json
 python -m go8agent eval --only E06        # 只跑某几条
 
+# 改完评分器后离线复判存档，不重跑模型、零成本
+python -m go8agent regrade evals/run.json
+
 # 9. 重抓之后看有什么变了
 python -m go8agent changes
 python -m go8agent stats
@@ -237,8 +240,23 @@ python -m go8agent stats
 教训：**关键词匹配天生脆弱，能用"不许出现某个数字"表达的性质，就不要用
 "必须说某句话"**——前者客观，后者主观。
 
-好在评估 JSON 里存了完整回答，改完评分器可以**离线复判，零成本**，
-不必重新跑模型。
+所以评估存档里存了完整回答**和完整工具返回**，改完评分器用
+`regrade` 离线复判即可，零成本：
+
+```
+对比存档: 通过率 98% -> 100%
+  由失败转通过 1（多半是评分器修复）: E06-UNSW无语言要求 第3次
+```
+
+"由通过转失败"要格外警惕——可能是判定变严，也可能是抓到了此前漏掉的真问题。
+
+存档含完整 trace，体积在 MB 量级且可重新跑出来，所以 `evals/*.json` 进了
+gitignore，`evals/cases.yaml` 才是版本库里的源。
+
+**缺 trace 时该项判定会被跳过，而不是判失败。** 老格式存档没存工具返回内容，
+数字判定无从比对；判通过等于放行所有幻觉，判失败会凭空造出一堆假问题
+（实测会让通过率从 98% 掉到 49%，全是假的）。唯一诚实的做法是记为"未判定"，
+并在通过率旁边标出来——否则读的人会把"没查"当成"没问题"。
 
 ## 分支约定
 
