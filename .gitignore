@@ -24,3 +24,6 @@ venv/
 
 # macOS
 .DS_Store
+.env.save
+.env.*
+!.env.example
